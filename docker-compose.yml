@@ -17,16 +17,17 @@ services:
 #      - ./setup/ghost/config.production.json:/var/lib/ghost/config.production.json
 #    restart: always
 
-  wordpress:
-    image: "wordpress:latest"
-    ports:
-      - "8000:80"
-    restart: always
-    environment:
-      - WORDPRESS_DB_HOST=172.31.208.159
-      - WORDPRESS_DB_USER=wordpress
-      - WORDPRESS_DB_PASSWORD=tR0zVEv%b#Upn#vo
-      - WORDPRESS_DB_NAME=wordpress
+#  wordpress:
+#    image: "wordpress:latest"
+#    ports:
+#      - "8000:80"
+#    restart: always
+#    environment:
+#      - WORDPRESS_DB_HOST=172.31.208.159
+#      - WORDPRESS_DB_USER=wordpress
+#      - WORDPRESS_DB_PASSWORD=tR0zVEv%b#Upn#vo
+#      - WORDPRESS_DB_NAME=wordpress
+
   nginx:
     build:
       context: ./setup/nginx
@@ -50,7 +51,7 @@ services:
           - nginx
 
   mysql:
-    image: "mysql:5.7"
+    image: "mysql:8.0.24"
     environment:
       - MYSQL_ROOT_PASSWORD=*qFsHjEd2w#0MHsY
       - MYSQL_USER=dev
@@ -65,13 +66,17 @@ services:
       - ./setup/mysql/conf/my.cnf:/etc/my.cnf
       - ./setup/mysql/log:/var/log/mysql
     restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "1g"
     networks:
       main:
         aliases:
           - mysql
 
   redis:
-    image: "redis:4.0"
+    image: "redis:5.0.0"
     ports:
       - "6379:6379"
     expose:
@@ -83,6 +88,10 @@ services:
     restart: always
     environment:
       - TZ=Asia/Shanghai
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "1g"
     networks:
       main:
         aliases:
