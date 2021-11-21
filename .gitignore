@@ -1,0 +1,13 @@
+.idea
+/setup/ghost/content/*
+/setup/ghost/log/*
+/setup/kafka/logs/*
+/setup/mysql/data/*
+/setup/mysql/log/*
+/setup/redis/data/*
+/setup/zookeeper/data/*
+/setup/zookeeper/log/*
+/setup/nginx/html/*
+/setup/nginx/data/download/*
+docker-compose-dev.yml
+!.gitkeep

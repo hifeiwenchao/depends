@@ -1,0 +1,38 @@
+{
+  "url": "http://www.feiwenchao.me",
+  "server": {
+    "port": 2368,
+    "host": "0.0.0.0"
+  },
+  "database": {
+    "client": "mysql",
+    "connection": {
+            "host"     : "172.31.208.159",
+            "port"     : 3306,
+            "user"     : "ghost",
+            "password" : "tR0zVEv%b#Upn#vo",
+            "database" : "ghost",
+            "charset"  : "utf8"
+        }
+  },
+  "mail": {
+    "transport": "SMTP",
+    "from": "hi@feiwenchao.me",
+    "options": {
+      "host": "smtp.exmail.qq.com",
+      "secureConnection": false,
+      "port": 465,
+      "auth": {
+        "user": "hi@feiwenchao.me",
+        "pass": "wen4525CHAO"
+      }
+    }
+  },
+  "logging": {
+    "transports": ["stdout", "file"]
+  },
+  "process": "systemd",
+  "paths": {
+    "contentPath": "/var/lib/ghost/content"
+  }
+}
