@@ -39,6 +39,7 @@ services:
       - ./setup/nginx/conf:/etc/nginx/conf.d
       - ./setup/nginx/html:/etc/nginx/html
       - ./setup/nginx/data:/data
+      - ./setup/nginx/ssl:/etc/nginx/ssl
     restart: always
     environment:
       - TZ=Asia/Shanghai
