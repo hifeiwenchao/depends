@@ -38,8 +38,9 @@ services:
     volumes:
       - ./setup/nginx/conf:/etc/nginx/conf.d
       - ./setup/nginx/html:/etc/nginx/html
-      - ./setup/nginx/data:/data
       - ./setup/nginx/ssl:/etc/nginx/ssl
+      - ./setup/nginx/static:/etc/nginx/static
+      - ./setup/nginx/media:/etc/nginx/media
     restart: always
     environment:
       - TZ=Asia/Shanghai
