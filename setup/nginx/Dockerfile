@@ -2,10 +2,10 @@ FROM nginx:1.15.6
 
 COPY ["conf/upstream.conf", "/etc/nginx/conf.d"]
 COPY ["ssl", "/etc/nginx/ssl"]
-COPY ["static", "/etc/nginx/static"]
-COPY ["media", "/etc/nginx/media"]
+#COPY ["static", "/etc/nginx/static"]
+#COPY ["media", "/etc/nginx/media"]
 
-RUN rm -f /etc/nginx/conf.d/default.conf && mkdir /etc/nginx/html
+RUN rm -f /etc/nginx/conf.d/default.conf && mkdir /etc/nginx/html && mkdir /etc/nginx/media && mkdir /etc/nginx/static
 
 EXPOSE 80
 EXPOSE 443

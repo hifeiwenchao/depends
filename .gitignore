@@ -8,8 +8,8 @@
 /setup/zookeeper/data/*
 /setup/zookeeper/log/*
 /setup/nginx/html/*
-/setup/nginx/static
-/setup/nginx/media
+/setup/nginx/static/*
+/setup/nginx/media/*
 /setup/nginx/data/download/*
 docker-compose-dev.yml
 !.gitkeep
