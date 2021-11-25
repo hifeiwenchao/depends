@@ -7,6 +7,8 @@
 /setup/redis/data/*
 /setup/zookeeper/data/*
 /setup/zookeeper/log/*
+/setup/mongo/log/*
+/setup/mongo/db/*
 /setup/nginx/html/*
 /setup/nginx/static/*
 /setup/nginx/media/*

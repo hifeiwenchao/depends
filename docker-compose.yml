@@ -99,5 +99,25 @@ services:
         aliases:
           - redis
 
+  mongo:
+    image: "mongo:5.0.3"
+    restart: always
+    volumes:
+      - ./setup/mongo/db:/data/db
+      - ./setup/mongo/log:/var/log/mongodb
+    ports:
+      - "27017:27017"
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=admin
+      - MONGO_INITDB_ROOT_PASSWORD=raLXYJDfF5sCGeZz
+    networks:
+      main:
+        aliases:
+          - mongo
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "1g"
+
 networks:
   main:
