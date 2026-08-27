@@ -1,4 +1,8 @@
-version: "3"
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "100m"
+    max-file: "3"
 
 services:
 #  ghost:
@@ -17,107 +21,154 @@ services:
 #      - ./setup/ghost/config.production.json:/var/lib/ghost/config.production.json
 #    restart: always
 
-#  wordpress:
-#    image: "wordpress:latest"
-#    ports:
-#      - "8000:80"
-#    restart: always
-#    environment:
-#      - WORDPRESS_DB_HOST=172.31.208.159
-#      - WORDPRESS_DB_USER=wordpress
-#      - WORDPRESS_DB_PASSWORD=tR0zVEv%b#Upn#vo
-#      - WORDPRESS_DB_NAME=wordpress
-
   nginx:
     build:
       context: ./setup/nginx
       dockerfile: Dockerfile
     ports:
-      - "80:80"
-      - "443:443"
+      - "127.0.0.1:80:80"
+      - "127.0.0.1:443:443"
     volumes:
       - ./setup/nginx/conf:/etc/nginx/conf.d
       - ./setup/nginx/html:/etc/nginx/html
       - ./setup/nginx/ssl:/etc/nginx/ssl
       - ./setup/nginx/static:/etc/nginx/static
       - ./setup/nginx/media:/etc/nginx/media
-    restart: always
+    restart: unless-stopped
     environment:
       - TZ=Asia/Shanghai
-    expose:
-      - "80"
-      - "443"
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    logging: *default-logging
     networks:
-      main:
-        aliases:
-          - nginx
+      - main
 
   mysql:
-    image: "mysql:8.0.24"
+    image: mysql:9.7.2
     environment:
-      - MYSQL_ROOT_PASSWORD=*qFsHjEd2w#0MHsY
-      - MYSQL_USER=dev
-      - MYSQL_PASSWORD=tR0zVEv%b#Upn#vo
-      - TZ=Asia/Shanghai
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD is required}
+      MYSQL_USER: ${MYSQL_USER:-dev}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD is required}
+      TZ: ${TZ:-Asia/Shanghai}
     ports:
-      - "3306:3306"
-    expose:
-      - "3306"
+      - "127.0.0.1:3306:3306"
     volumes:
       - ./setup/mysql/data:/var/lib/mysql
-      - ./setup/mysql/conf/my.cnf:/etc/my.cnf
+      - ./setup/mysql/conf/my.cnf:/etc/my.cnf:ro
       - ./setup/mysql/log:/var/log/mysql
-    restart: always
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "1g"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "MYSQL_PWD=\"$$MYSQL_ROOT_PASSWORD\" mysql -h 127.0.0.1 -uroot --silent --skip-column-names --execute='SELECT 1' | grep -qx 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    logging: *default-logging
     networks:
-      main:
-        aliases:
-          - mysql
+      - main
 
   redis:
-    image: "redis:5.0.0"
+    image: redis:8.10.1
     ports:
-      - "6379:6379"
-    expose:
-      - "6379"
+      - "127.0.0.1:6379:6379"
     volumes:
-      - ./setup/redis/conf/redis.conf:/etc/redis/redis.conf
+      - ./setup/redis/conf/redis.conf:/etc/redis/redis.conf:ro
+      - ./setup/redis/docker-entrypoint.sh:/usr/local/bin/depends-redis-entrypoint:ro
       - ./setup/redis/data:/data
-    command: redis-server /etc/redis/redis.conf
-    restart: always
+    entrypoint: ["/usr/local/bin/depends-redis-entrypoint"]
+    command: ["redis-server", "/etc/redis/redis.conf"]
+    restart: unless-stopped
     environment:
-      - TZ=Asia/Shanghai
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "1g"
+      REDIS_USERNAME: ${REDIS_USERNAME:-default}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+      TZ: ${TZ:-Asia/Shanghai}
+    tmpfs:
+      - /run/redis:mode=700
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli --user \"$$REDIS_USERNAME\" --no-auth-warning ping | grep -qx PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    logging: *default-logging
     networks:
-      main:
-        aliases:
-          - redis
+      - main
+
+  rabbitmq:
+    image: rabbitmq:4.3.5-management
+    hostname: rabbitmq
+    ports:
+      - "127.0.0.1:5672:5672"
+      - "127.0.0.1:15672:15672"
+    volumes:
+      - ./setup/rabbitmq/conf/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+      - ./setup/rabbitmq/conf/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
+      - ./setup/rabbitmq/docker-entrypoint.sh:/usr/local/bin/depends-rabbitmq-entrypoint:ro
+      - ./setup/rabbitmq/data:/var/lib/rabbitmq
+    entrypoint: ["/usr/local/bin/depends-rabbitmq-entrypoint"]
+    command: ["rabbitmq-server"]
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-dev}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:?RABBITMQ_DEFAULT_PASS is required}
+      TZ: ${TZ:-Asia/Shanghai}
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    logging: *default-logging
+    networks:
+      - main
 
   mongo:
-    image: "mongo:5.0.3"
-    restart: always
+    image: mongo:8.3.8-noble
+    restart: unless-stopped
     volumes:
       - ./setup/mongo/db:/data/db
       - ./setup/mongo/log:/var/log/mongodb
     ports:
-      - "27017:27017"
+      - "127.0.0.1:27017:27017"
     environment:
-      - MONGO_INITDB_ROOT_USERNAME=admin
-      - MONGO_INITDB_ROOT_PASSWORD=raLXYJDfF5sCGeZz
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD:?MONGO_INITDB_ROOT_PASSWORD is required}
+      TZ: ${TZ:-Asia/Shanghai}
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --quiet --host 127.0.0.1 --username \"$$MONGO_INITDB_ROOT_USERNAME\" --password \"$$MONGO_INITDB_ROOT_PASSWORD\" --authenticationDatabase admin --eval 'quit(db.adminCommand({ping:1}).ok ? 0 : 2)'"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    logging: *default-logging
     networks:
-      main:
-        aliases:
-          - mongo
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "1g"
+      - main
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.5.2
+    ports:
+      - "127.0.0.1:9200:9200"
+    volumes:
+      - ./setup/elasticsearch/config/elasticsearch.yml:/usr/share/elasticsearch/config/elasticsearch.yml:ro
+      - ./setup/elasticsearch/data:/usr/share/elasticsearch/data
+    mem_limit: 1g
+    restart: unless-stopped
+    environment:
+      ELASTIC_PASSWORD: ${ELASTIC_PASSWORD:?ELASTIC_PASSWORD is required}
+      TZ: ${TZ:-Asia/Shanghai}
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent --show-error --output /dev/null --user \"elastic:$$ELASTIC_PASSWORD\" 'http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s'"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 60s
+    logging: *default-logging
+    networks:
+      - main
 
 networks:
   main:

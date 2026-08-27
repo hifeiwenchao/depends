@@ -1,0 +1,2 @@
+# TLS material is runtime-mounted and must never enter the image build context.
+ssl/

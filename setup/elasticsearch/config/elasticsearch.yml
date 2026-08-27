@@ -1,0 +1,9 @@
+cluster.name: depends-elasticsearch
+node.name: depends-es01
+network.host: 0.0.0.0
+transport.host: 127.0.0.1
+discovery.type: single-node
+xpack.security.enabled: true
+xpack.security.autoconfiguration.enabled: false
+xpack.security.http.ssl.enabled: false
+xpack.security.transport.ssl.enabled: false

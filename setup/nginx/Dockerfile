@@ -1,7 +1,6 @@
-FROM nginx:1.15.6
+FROM nginx:1.30.4-trixie
 
 COPY ["conf/upstream.conf", "/etc/nginx/conf.d"]
-COPY ["ssl", "/etc/nginx/ssl"]
 #COPY ["static", "/etc/nginx/static"]
 #COPY ["media", "/etc/nginx/media"]
 
