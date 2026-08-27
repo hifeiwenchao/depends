@@ -5,7 +5,7 @@
 ## 环境要求
 
 - Docker Engine 或 Docker Desktop。
-- Docker Compose v2（使用 `docker compose`，而不是旧版的 `docker-compose` 命令）。
+- Docker Compose v2.17.2 或更高版本（使用 `docker compose`，而不是旧版的 `docker-compose` 命令）。
 - 本地仓库副本。
 - 远程主机的公网或私网地址、DNS（如有），以及已放行的云安全组和主机防火墙规则。
 - 在 Docker Desktop 上运行 Elasticsearch 时，共享仓库路径，为 Docker Desktop Linux 虚拟机分配至少 4 GiB 内存，并在该虚拟机内确保 `vm.max_map_count` 至少为 `1048576`，然后再启动。
