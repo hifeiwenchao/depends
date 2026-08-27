@@ -6,7 +6,7 @@
 
 - Docker Engine 或 Docker Desktop。
 - Docker Compose v2（使用 `docker compose`，而不是旧版的 `docker-compose` 命令）。
-- 本地仓库副本，以及该服务栈所需的 Nginx 证书文件和内容。
+- 本地仓库副本。
 - 远程主机的公网或私网地址、DNS（如有），以及已放行的云安全组和主机防火墙规则。
 - 在 Docker Desktop 上运行 Elasticsearch 时，共享仓库路径，为 Docker Desktop Linux 虚拟机分配至少 4 GiB 内存，并在该虚拟机内确保 `vm.max_map_count` 至少为 `1048576`，然后再启动。
 
@@ -39,6 +39,7 @@ docker compose up -d redis
 docker compose up -d mongo
 docker compose up -d mysql
 docker compose up -d nginx
+docker compose up -d --no-deps --force-recreate --wait --wait-timeout 60 nginx
 docker compose up -d rabbitmq
 docker compose up -d elasticsearch
 docker compose ps
@@ -52,22 +53,19 @@ docker compose ps
 
 ```bash
 docker compose ps
-docker compose run --rm nginx nginx -t
-curl -I http://127.0.0.1/
-curl -Ik https://127.0.0.1/ -H 'Host: feiwenchao.com'
+docker compose run --rm --no-deps nginx nginx -t
+curl --fail --silent --show-error http://127.0.0.1/ | grep -F 'Welcome to nginx!'
 ```
 
-HTTP 请求可能会重定向到 HTTPS。HTTPS 根请求依赖配置的外部 uWSGI 上游；当该上游不可用时请求可能超时，但这本身不能说明 Nginx 未能接受 HTTPS。使用已知的本地静态路径，可以区分 Nginx 传输层/配置问题和上游可用性。除本地 `-k` 冒烟测试选项外，不要禁用证书验证。从远程客户端验证时，将示例中的 `127.0.0.1` 替换为服务器的 DNS 名称或 IP 地址。确认宿主机的发布端口为 `80`、`443`、`3306`、`6379`、`27017`、`5672`、`15672` 和 `9200`，并且这些端口默认绑定所有网络接口。RabbitMQ 的 Prometheus 端口 `15692` 保持为容器内部端口，Elasticsearch 传输端口 `9300` 不得发布到主机。
+Nginx 通过 HTTP 提供官方镜像欢迎页，没有 HTTPS 监听器，也不再依赖应用上游。从远程客户端验证时，将示例中的 `127.0.0.1` 替换为服务器的 DNS 名称或 IP 地址。确认宿主机的发布端口为 `80`、`3306`、`6379`、`27017`、`5672`、`15672` 和 `9200`，并且这些端口默认绑定所有网络接口。RabbitMQ 的 Prometheus 端口 `15692` 保持为容器内部端口，Elasticsearch 传输端口 `9300` 不得发布到主机。
 
-Nginx 使用以下本地映射；配置目录以只读方式挂载，并隐藏官方镜像自带的默认站点配置：
+Nginx 使用以下本地映射；配置目录以只读方式完整挂载：
 
 ```text
-setup/nginx/conf/ -> /etc/nginx/conf.d (只读)
-setup/nginx/html/ -> /etc/nginx/html
-setup/nginx/media/ -> /etc/nginx/media
-setup/nginx/ssl/ -> /etc/nginx/ssl
-setup/nginx/static/ -> /etc/nginx/static
+setup/nginx/conf/ -> /etc/nginx (read-only)
 ```
+
+该本地树是 `nginx:1.30.4-trixie` 的精确快照；镜像标签变更时必须刷新该树。
 
 进行组件检查时，请使用经过身份验证的命令，并避免将密码写入 shell 历史或日志。示例：
 
@@ -178,7 +176,7 @@ PY
 
 | 服务 | 镜像或基础镜像 | 宿主机端口映射 |
 | --- | --- | --- |
-| Nginx | `nginx:1.30.4-trixie` | `80:80`、`443:443` |
+| Nginx | `nginx:1.30.4-trixie` | `80:80` |
 | Redis | `redis:8.10.1` | `6379:6379` |
 | MySQL | `mysql:9.7.2` | `3306:3306` |
 | MongoDB | `mongo:8.3.8-noble` | `27017:27017` |
