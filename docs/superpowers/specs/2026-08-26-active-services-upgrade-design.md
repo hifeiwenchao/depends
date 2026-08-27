@@ -2,7 +2,7 @@
 
 ## Context
 
-This repository provides Docker Compose configuration for foundational services. The six active services are Nginx, MySQL, Redis, MongoDB, RabbitMQ, and Elasticsearch. Ghost, WordPress, Kafka, ZooKeeper, Zabbix, and File Browser are outside this upgrade.
+This repository provides Docker Compose configuration for foundational services. The six active services are Nginx, MySQL, Redis, MongoDB, RabbitMQ, and Elasticsearch. Legacy inactive services are outside this upgrade.
 
 The stack targets a personal development machine. Runtime data in the five reset directories for MySQL, Redis, MongoDB, RabbitMQ, and Elasticsearch is disposable and requires neither migration nor backward compatibility. The upgrade initializes each stateful service from an empty data directory.
 

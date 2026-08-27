@@ -5,22 +5,6 @@ x-logging: &default-logging
     max-file: "3"
 
 services:
-#  ghost:
-#    build:
-#      context: ./setup/ghost
-#      dockerfile: Dockerfile
-#    environment:
-#      - TZ=Asia/Shanghai
-#    ports:
-#      - "2368:2368"
-#    expose:
-#      - "2368"
-#    volumes:
-#      - ./setup/ghost/log:/var/log/ghost
-#      - ./setup/ghost/content:/var/lib/ghost/content
-#      - ./setup/ghost/config.production.json:/var/lib/ghost/config.production.json
-#    restart: always
-
   nginx:
     build:
       context: ./setup/nginx
