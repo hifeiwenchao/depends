@@ -1,6 +1,6 @@
 # depends
 
-用于远程主机上的个人开发服务栈。本配置使用 Compose 的简写端口映射（例如 `2368:2368`），默认将已发布的服务端口绑定到所有宿主机网络接口，允许外部客户端访问；仍**不适用于生产环境**。操作者必须控制 Docker 主机及其网络边界。
+用于远程主机上的个人开发服务栈。本配置使用 Compose 的简写端口映射（例如 `80:80`），默认将已发布的服务端口绑定到所有宿主机网络接口，允许外部客户端访问；仍**不适用于生产环境**。操作者必须控制 Docker 主机及其网络边界。
 
 ## 环境要求
 
@@ -20,7 +20,7 @@ cp .env.example .env
 
 在 `.env` 中设置以下本地凭据：`MYSQL_ROOT_PASSWORD`、`MYSQL_PASSWORD`、`REDIS_PASSWORD`、`MONGO_INITDB_ROOT_PASSWORD`、`RABBITMQ_DEFAULT_PASS` 和 `ELASTIC_PASSWORD`。每个密码都必须使用 URL 安全字符集 `[A-Za-z0-9._~-]+` 生成；验证示例会将 `.env` 作为 POSIX shell 脚本加载，Redis ACL 生成也会强制使用同一字符集。`RABBITMQ_DEFAULT_USER` 默认为 `dev`；对于普通的容器网络客户端，不要使用 `guest`。将 `.env` 保留在本地：不要提交它，也不要把凭据粘贴到 issue 或聊天记录中。不要暴露或分享其内容。
 
-此配置会将 MySQL、Redis、MongoDB、RabbitMQ AMQP/Management 和 Elasticsearch HTTP 端口发布到所有网络接口。Compose 中省略宿主机 IP 的映射（例如 `2368:2368`）等价于 IPv4 的 `0.0.0.0:2368:2368`。请在云安全组和主机防火墙中限制来源 IP；不要把这些端口直接暴露给不受信任的公网。远程访问必须使用强凭据；生产环境还应通过 VPN、反向代理或其他受控网络边界提供 TLS 和访问控制。
+此配置会将 MySQL、Redis、MongoDB、RabbitMQ AMQP/Management 和 Elasticsearch HTTP 端口发布到所有网络接口。Compose 中省略宿主机 IP 的映射（例如 `80:80`）等价于 IPv4 的 `0.0.0.0:80:80`。请在云安全组和主机防火墙中限制来源 IP；不要把这些端口直接暴露给不受信任的公网。远程访问必须使用强凭据；生产环境还应通过 VPN、反向代理或其他受控网络边界提供 TLS 和访问控制。
 
 Compose 文件**不会自动创建 MySQL 应用数据库**。如果应用需要，请在 MySQL 健康运行后显式创建应用数据库。
 
@@ -30,11 +30,11 @@ RabbitMQ 首次以空数据目录启动时，会创建配置的用户并使用�
 
 ## 启动
 
-先验证渲染后的 Compose 配置，构建 Nginx，然后按安全的依赖顺序启动服务：
+先验证渲染后的 Compose 配置，拉取官方 Nginx 镜像，然后按安全的依赖顺序启动服务：
 
 ```bash
 docker compose config --quiet
-docker compose build nginx
+docker compose pull nginx
 docker compose up -d redis
 docker compose up -d mongo
 docker compose up -d mysql
@@ -44,7 +44,7 @@ docker compose up -d elasticsearch
 docker compose ps
 ```
 
-按上述顺序逐个启动并验证有状态服务；等待每个服务变为 healthy 后再继续。Nginx 构建使用 `nginx:1.30.4-trixie`。其他服务使用下方列出的精确版本。六个服务都应处于运行状态，并最终报告 `healthy`。
+按上述顺序逐个启动并验证有状态服务；等待每个服务变为 healthy 后再继续。Nginx 直接使用官方 `nginx:1.30.4-trixie` 镜像，不执行本地镜像构建。其他服务使用下方列出的精确版本。六个服务都应处于运行状态，并最终报告 `healthy`。
 
 ## 验证
 
@@ -58,6 +58,16 @@ curl -Ik https://127.0.0.1/ -H 'Host: feiwenchao.me'
 ```
 
 HTTP 请求可能会重定向到 HTTPS。HTTPS 根请求依赖配置的外部 uWSGI 上游；当该上游不可用时请求可能超时，但这本身不能说明 Nginx 未能接受 HTTPS。使用已知的本地静态路径，可以区分 Nginx 传输层/配置问题和上游可用性。除本地 `-k` 冒烟测试选项外，不要禁用证书验证。从远程客户端验证时，将示例中的 `127.0.0.1` 替换为服务器的 DNS 名称或 IP 地址。确认宿主机的发布端口为 `80`、`443`、`3306`、`6379`、`27017`、`5672`、`15672` 和 `9200`，并且这些端口默认绑定所有网络接口。RabbitMQ 的 Prometheus 端口 `15692` 保持为容器内部端口，Elasticsearch 传输端口 `9300` 不得发布到主机。
+
+Nginx 使用以下本地映射；配置目录以只读方式挂载，并隐藏官方镜像自带的默认站点配置：
+
+```text
+setup/nginx/conf/ -> /etc/nginx/conf.d (只读)
+setup/nginx/html/ -> /etc/nginx/html
+setup/nginx/media/ -> /etc/nginx/media
+setup/nginx/ssl/ -> /etc/nginx/ssl
+setup/nginx/static/ -> /etc/nginx/static
+```
 
 进行组件检查时，请使用经过身份验证的命令，并避免将密码写入 shell 历史或日志。示例：
 

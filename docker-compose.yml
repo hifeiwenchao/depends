@@ -6,14 +6,12 @@ x-logging: &default-logging
 
 services:
   nginx:
-    build:
-      context: ./setup/nginx
-      dockerfile: Dockerfile
+    image: nginx:1.30.4-trixie
     ports:
       - "80:80"
       - "443:443"
     volumes:
-      - ./setup/nginx/conf:/etc/nginx/conf.d
+      - ./setup/nginx/conf:/etc/nginx/conf.d:ro
       - ./setup/nginx/html:/etc/nginx/html
       - ./setup/nginx/ssl:/etc/nginx/ssl
       - ./setup/nginx/static:/etc/nginx/static

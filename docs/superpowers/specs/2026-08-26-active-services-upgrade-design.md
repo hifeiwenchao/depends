@@ -79,7 +79,7 @@ Redis authentication uses an ACL file generated at container start inside `/run/
 
 ## Nginx design
 
-`setup/nginx/Dockerfile` changes its base to `nginx:1.30.4-trixie`. The current paths remain compatible. Runtime Compose bind mounts continue to be authoritative, so validation must run with Compose mounts rather than only testing the image's baked copies.
+Compose starts the official `nginx:1.30.4-trixie` image directly without a custom Dockerfile. It mounts `setup/nginx/conf/` read-only at `/etc/nginx/conf.d`, which supplies `upstream.conf` and hides the image's default site configuration. The `html`, `media`, `ssl`, and `static` directories are mounted at matching paths below `/etc/nginx`.
 
 `setup/nginx/conf/upstream.conf` changes include:
 
