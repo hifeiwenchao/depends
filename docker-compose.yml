@@ -26,8 +26,8 @@ services:
       context: ./setup/nginx
       dockerfile: Dockerfile
     ports:
-      - "127.0.0.1:80:80"
-      - "127.0.0.1:443:443"
+      - "80:80"
+      - "443:443"
     volumes:
       - ./setup/nginx/conf:/etc/nginx/conf.d
       - ./setup/nginx/html:/etc/nginx/html
@@ -55,7 +55,7 @@ services:
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD is required}
       TZ: ${TZ:-Asia/Shanghai}
     ports:
-      - "127.0.0.1:3306:3306"
+      - "3306:3306"
     volumes:
       - ./setup/mysql/data:/var/lib/mysql
       - ./setup/mysql/conf/my.cnf:/etc/my.cnf:ro
@@ -74,7 +74,7 @@ services:
   redis:
     image: redis:8.10.1
     ports:
-      - "127.0.0.1:6379:6379"
+      - "6379:6379"
     volumes:
       - ./setup/redis/conf/redis.conf:/etc/redis/redis.conf:ro
       - ./setup/redis/docker-entrypoint.sh:/usr/local/bin/depends-redis-entrypoint:ro
@@ -102,8 +102,8 @@ services:
     image: rabbitmq:4.3.5-management
     hostname: rabbitmq
     ports:
-      - "127.0.0.1:5672:5672"
-      - "127.0.0.1:15672:15672"
+      - "5672:5672"
+      - "15672:15672"
     volumes:
       - ./setup/rabbitmq/conf/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
       - ./setup/rabbitmq/conf/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
@@ -133,7 +133,7 @@ services:
       - ./setup/mongo/db:/data/db
       - ./setup/mongo/log:/var/log/mongodb
     ports:
-      - "127.0.0.1:27017:27017"
+      - "27017:27017"
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME:-admin}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD:?MONGO_INITDB_ROOT_PASSWORD is required}
@@ -151,7 +151,7 @@ services:
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:9.5.2
     ports:
-      - "127.0.0.1:9200:9200"
+      - "9200:9200"
     volumes:
       - ./setup/elasticsearch/config/elasticsearch.yml:/usr/share/elasticsearch/config/elasticsearch.yml:ro
       - ./setup/elasticsearch/data:/usr/share/elasticsearch/data

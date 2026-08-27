@@ -1,33 +1,36 @@
 # depends
 
-Personal-development service stack for a single machine. This setup is **not for production**. It binds service ports to loopback and assumes that the operator controls the local Docker host.
+用于远程主机上的个人开发服务栈。本配置使用 Compose 的简写端口映射（例如 `2368:2368`），默认将已发布的服务端口绑定到所有宿主机网络接口，允许外部客户端访问；仍**不适用于生产环境**。操作者必须控制 Docker 主机及其网络边界。
 
-## Requirements
+## 环境要求
 
-- Docker Engine or Docker Desktop.
-- Docker Compose v2 (`docker compose`, not the legacy `docker-compose` command).
-- A local copy of the repository with the Nginx certificate files and content expected by this stack.
-- For Elasticsearch on Docker Desktop, share the repository path, allocate at least 4 GiB to the Docker Desktop Linux VM, and ensure `vm.max_map_count` is at least `1048576` inside that VM before startup.
+- Docker Engine 或 Docker Desktop。
+- Docker Compose v2（使用 `docker compose`，而不是旧版的 `docker-compose` 命令）。
+- 本地仓库副本，以及该服务栈所需的 Nginx 证书文件和内容。
+- 远程主机的公网或私网地址、DNS（如有），以及已放行的云安全组和主机防火墙规则。
+- 在 Docker Desktop 上运行 Elasticsearch 时，共享仓库路径，为 Docker Desktop Linux 虚拟机分配至少 4 GiB 内存，并在该虚拟机内确保 `vm.max_map_count` 至少为 `1048576`，然后再启动。
 
-## Configure
+## 配置
 
-Copy the example environment file and fill in the required values locally:
+复制示例环境文件，并在本地填写所需值：
 
 ```bash
 cp .env.example .env
 ```
 
-Set the required local credentials in `.env`: `MYSQL_ROOT_PASSWORD`, `MYSQL_PASSWORD`, `REDIS_PASSWORD`, `MONGO_INITDB_ROOT_PASSWORD`, `RABBITMQ_DEFAULT_PASS`, and `ELASTIC_PASSWORD`. Generate every password from the URL-safe character set `[A-Za-z0-9._~-]+`; the validation examples source `.env` as POSIX shell, and Redis ACL generation enforces this same set. `RABBITMQ_DEFAULT_USER` defaults to `dev`; do not use `guest` for normal container-network clients. Keep `.env` local: never commit it, and never paste credentials into issue or chat logs. Do not expose or share its contents.
+在 `.env` 中设置以下本地凭据：`MYSQL_ROOT_PASSWORD`、`MYSQL_PASSWORD`、`REDIS_PASSWORD`、`MONGO_INITDB_ROOT_PASSWORD`、`RABBITMQ_DEFAULT_PASS` 和 `ELASTIC_PASSWORD`。每个密码都必须使用 URL 安全字符集 `[A-Za-z0-9._~-]+` 生成；验证示例会将 `.env` 作为 POSIX shell 脚本加载，Redis ACL 生成也会强制使用同一字符集。`RABBITMQ_DEFAULT_USER` 默认为 `dev`；对于普通的容器网络客户端，不要使用 `guest`。将 `.env` 保留在本地：不要提交它，也不要把凭据粘贴到 issue 或聊天记录中。不要暴露或分享其内容。
 
-The Compose file does **not** create a MySQL application database automatically. Create an application database explicitly after MySQL is healthy if your application requires one.
+此配置会将 MySQL、Redis、MongoDB、RabbitMQ AMQP/Management 和 Elasticsearch HTTP 端口发布到所有网络接口。Compose 中省略宿主机 IP 的映射（例如 `2368:2368`）等价于 IPv4 的 `0.0.0.0:2368:2368`。请在云安全组和主机防火墙中限制来源 IP；不要把这些端口直接暴露给不受信任的公网。远程访问必须使用强凭据；生产环境还应通过 VPN、反向代理或其他受控网络边界提供 TLS 和访问控制。
 
-MySQL applies `MYSQL_ROOT_PASSWORD`, `MYSQL_USER`, and `MYSQL_PASSWORD` only while initializing an empty `setup/mysql/data/`. Changing those values in `.env` does not rotate accounts in an initialized data directory; use authenticated `ALTER USER` statements for rotation. MongoDB likewise applies `MONGO_INITDB_ROOT_USERNAME` and `MONGO_INITDB_ROOT_PASSWORD` only while initializing an empty `setup/mongo/db/`; changing `.env` later does not rotate that persisted user, so rotate it with an authenticated MongoDB user-management command.
+Compose 文件**不会自动创建 MySQL 应用数据库**。如果应用需要，请在 MySQL 健康运行后显式创建应用数据库。
 
-On its first start with an empty data directory, RabbitMQ creates the configured user and uses the default `/` vhost; it does not create an application-specific vhost. The RabbitMQ bootstrap environment variables apply only during initialization, so changing them later does not rotate credentials stored in persisted broker data. Elasticsearch similarly applies `ELASTIC_PASSWORD` only when initializing empty data. For an initialized cluster, changing the environment does not rotate the built-in `elastic` password; use `elasticsearch-reset-password` instead.
+MySQL 仅在初始化空的 `setup/mysql/data/` 时应用 `MYSQL_ROOT_PASSWORD`、`MYSQL_USER` 和 `MYSQL_PASSWORD`。在已初始化的数据目录中修改 `.env` 不会轮换账户；请使用经过身份验证的 `ALTER USER` 语句进行轮换。MongoDB 同样仅在初始化空的 `setup/mongo/db/` 时应用 `MONGO_INITDB_ROOT_USERNAME` 和 `MONGO_INITDB_ROOT_PASSWORD`；之后修改 `.env` 不会轮换已持久化的用户，因此请使用经过身份验证的 MongoDB 用户管理命令进行轮换。
 
-## Start
+RabbitMQ 首次以空数据目录启动时，会创建配置的用户并使用默认 `/` vhost；它不会创建特定于应用的 vhost。RabbitMQ 引导环境变量只在初始化期间生效，因此之后修改它们不会轮换持久化在 broker 数据中的凭据。Elasticsearch 同样只在初始化空数据时应用 `ELASTIC_PASSWORD`。对于已初始化的集群，修改环境变量不会轮换内置 `elastic` 密码；请改用 `elasticsearch-reset-password`。
 
-Validate the rendered Compose configuration, build Nginx, then start the services in dependency-safe order:
+## 启动
+
+先验证渲染后的 Compose 配置，构建 Nginx，然后按安全的依赖顺序启动服务：
 
 ```bash
 docker compose config --quiet
@@ -41,11 +44,11 @@ docker compose up -d elasticsearch
 docker compose ps
 ```
 
-Start and validate stateful services one at a time in that order; wait for each service to become healthy before proceeding. The Nginx build uses `nginx:1.30.4-trixie`. The other services use the exact versions listed below. All six services should be running and should eventually report `healthy`.
+按上述顺序逐个启动并验证有状态服务；等待每个服务变为 healthy 后再继续。Nginx 构建使用 `nginx:1.30.4-trixie`。其他服务使用下方列出的精确版本。六个服务都应处于运行状态，并最终报告 `healthy`。
 
-## Validate
+## 验证
 
-Inspect service state and wait for every service health check to pass:
+检查服务状态，并等待每个服务的健康检查通过：
 
 ```bash
 docker compose ps
@@ -54,12 +57,12 @@ curl -I http://127.0.0.1/
 curl -Ik https://127.0.0.1/ -H 'Host: feiwenchao.me'
 ```
 
-The HTTP request may return a redirect to HTTPS. The HTTPS root request depends on the configured external uWSGI upstream and may time out when that upstream is unavailable; this does not by itself show that Nginx failed to accept HTTPS. Use a known local static path to distinguish Nginx transport/configuration from upstream availability. Do not disable certificate verification beyond the local `-k` smoke-test option. Confirm the exact loopback bindings are `127.0.0.1:80`, `127.0.0.1:443`, `127.0.0.1:3306`, `127.0.0.1:6379`, `127.0.0.1:27017`, `127.0.0.1:5672`, `127.0.0.1:15672`, and `127.0.0.1:9200`. RabbitMQ's Prometheus port `15692` remains container-internal, and Elasticsearch transport port `9300` must not be published to the host.
+HTTP 请求可能会重定向到 HTTPS。HTTPS 根请求依赖配置的外部 uWSGI 上游；当该上游不可用时请求可能超时，但这本身不能说明 Nginx 未能接受 HTTPS。使用已知的本地静态路径，可以区分 Nginx 传输层/配置问题和上游可用性。除本地 `-k` 冒烟测试选项外，不要禁用证书验证。从远程客户端验证时，将示例中的 `127.0.0.1` 替换为服务器的 DNS 名称或 IP 地址。确认宿主机的发布端口为 `80`、`443`、`3306`、`6379`、`27017`、`5672`、`15672` 和 `9200`，并且这些端口默认绑定所有网络接口。RabbitMQ 的 Prometheus 端口 `15692` 保持为容器内部端口，Elasticsearch 传输端口 `9300` 不得发布到主机。
 
-For component checks, use authenticated commands without putting passwords in shell history or logs. Examples:
+进行组件检查时，请使用经过身份验证的命令，并避免将密码写入 shell 历史或日志。示例：
 
 ```bash
-# Export .env only in this shell. Disable tracing first so values are not echoed.
+# 仅在此 shell 中导出 .env。先禁用跟踪，避免回显值。
 set +x
 set -a
 . ./.env
@@ -73,26 +76,26 @@ curl --fail --silent --show-error --user "elastic:$ELASTIC_PASSWORD" 'http://127
 unset REDIS_PASSWORD MYSQL_ROOT_PASSWORD MYSQL_PASSWORD MONGO_INITDB_ROOT_PASSWORD RABBITMQ_DEFAULT_PASS ELASTIC_PASSWORD
 ```
 
-Redis should answer `PONG`; MySQL should report that it is alive; MongoDB should answer a ping command successfully. RabbitMQ should pass broker diagnostics and expose its authenticated Management API only at `127.0.0.1:15672`. Elasticsearch should require the `elastic` password over plaintext HTTP at loopback-only `http://127.0.0.1:9200` and reach yellow or green single-node cluster health. Password-over-HTTP is deliberate only because the endpoint is loopback-bound; it is not appropriate for LAN or production exposure. Verify the reported component versions are the versions below and that all six Compose services are healthy before using the stack.
+Redis 应返回 `PONG`；MySQL 应报告其正在运行；MongoDB 应成功响应 ping 命令。RabbitMQ 应通过 broker 诊断，并且其经过身份验证的管理 API 已发布到宿主机所有网络接口的 `15672` 端口。Elasticsearch 应在 `http://服务器地址:9200` 上要求 `elastic` 密码，并达到黄色或绿色的单节点集群健康状态。当前 Elasticsearch 使用明文 HTTP；远程部署时必须通过防火墙、VPN 或反向代理限制访问，生产环境应启用 TLS。确认报告的组件版本与下方版本一致，并在使用该服务栈前确认六个 Compose 服务都处于 healthy 状态。
 
-RabbitMQ uses these local mappings:
+RabbitMQ 使用以下本地映射：
 
 ```text
-setup/rabbitmq/conf/rabbitmq.conf -> /etc/rabbitmq/rabbitmq.conf (read-only)
-setup/rabbitmq/conf/enabled_plugins -> /etc/rabbitmq/enabled_plugins (read-only)
+setup/rabbitmq/conf/rabbitmq.conf -> /etc/rabbitmq/rabbitmq.conf (只读)
+setup/rabbitmq/conf/enabled_plugins -> /etc/rabbitmq/enabled_plugins (只读)
 setup/rabbitmq/data/ -> /var/lib/rabbitmq
 ```
 
-Elasticsearch uses these local mappings:
+Elasticsearch 使用以下本地映射：
 
 ```text
-setup/elasticsearch/config/elasticsearch.yml -> /usr/share/elasticsearch/config/elasticsearch.yml (read-only)
+setup/elasticsearch/config/elasticsearch.yml -> /usr/share/elasticsearch/config/elasticsearch.yml (只读)
 setup/elasticsearch/data/ -> /usr/share/elasticsearch/data
 ```
 
-## Reset data
+## 重置数据
 
-This is destructive and permanently deletes only the contents beneath these development data directories:
+此操作具有破坏性，并会永久删除以下开发数据目录中的**全部内容**：
 
 ```text
 setup/mysql/data/
@@ -102,7 +105,7 @@ setup/rabbitmq/data/
 setup/elasticsearch/data/
 ```
 
-This list defines the current reset boundary; it does **not** claim that RabbitMQ or Elasticsearch data was deleted during any earlier reset. Run the following procedure from the repository root. It first requires all five corresponding services to stop successfully, resolves and checks each exact target without following a target symlink, displays the resolved paths, and requires an exact confirmation phrase. It preserves every parent directory and any `.gitkeep` placeholder while deleting the other entries, including hidden entries.
+此列表定义当前的重置边界；它**不表示** RabbitMQ 或 Elasticsearch 的数据在任何先前的重置中已被删除。请从仓库根目录运行以下流程。流程首先要求对应的五个服务全部成功停止，然后解析并检查每个精确目标且不跟随目标符号链接，显示解析后的路径，并要求输入精确的确认短语。它会保留所有父目录和任何 `.gitkeep` 占位文件，同时删除其他条目，包括隐藏条目。
 
 ```bash
 set -eu
@@ -159,17 +162,17 @@ for target in targets:
 PY
 ```
 
-If the stop command or any exact-path check fails, the shell exits before confirmation or deletion. Do not use `docker compose down -v`, a broad `rm`, or a deletion command aimed at `setup/`; those operations exceed this reset boundary. Do not start MongoDB 8.3 against old MongoDB 5 data files. If WiredTiger rejects the bind mount on macOS, stop the stack and use a Docker named volume for MongoDB's `/data/db` instead of reusing or upgrading the old files in place; restore or migrate data only through a documented, compatible MongoDB procedure.
+如果停止命令或任一精确路径检查失败，shell 会在确认或删除前退出。不要使用 `docker compose down -v`、宽泛的 `rm`，或针对 `setup/` 的删除命令；这些操作超出了上述重置边界。不要让 MongoDB 8.3 使用旧的 MongoDB 5 数据文件启动。如果 WiredTiger 在 macOS 上拒绝绑定挂载，请停止服务栈，并为 MongoDB 的 `/data/db` 使用 Docker 命名卷，而不是在原位置复用或升级旧文件；只能通过有文档记录且兼容的 MongoDB 流程恢复或迁移数据。
 
-## Service versions
+## 服务版本
 
-| Service | Image or base image | Loopback endpoint |
+| 服务 | 镜像或基础镜像 | 宿主机端口映射 |
 | --- | --- | --- |
-| Nginx | `nginx:1.30.4-trixie` | `127.0.0.1:80`, `127.0.0.1:443` |
-| Redis | `redis:8.10.1` | `127.0.0.1:6379` |
-| MySQL | `mysql:9.7.2` | `127.0.0.1:3306` |
-| MongoDB | `mongo:8.3.8-noble` | `127.0.0.1:27017` |
-| RabbitMQ | `rabbitmq:4.3.5-management` | `127.0.0.1:5672`, `127.0.0.1:15672` |
-| Elasticsearch | `docker.elastic.co/elasticsearch/elasticsearch:9.5.2` | `http://127.0.0.1:9200` |
+| Nginx | `nginx:1.30.4-trixie` | `80:80`、`443:443` |
+| Redis | `redis:8.10.1` | `6379:6379` |
+| MySQL | `mysql:9.7.2` | `3306:3306` |
+| MongoDB | `mongo:8.3.8-noble` | `27017:27017` |
+| RabbitMQ | `rabbitmq:4.3.5-management` | `5672:5672`、`15672:15672` |
+| Elasticsearch | `docker.elastic.co/elasticsearch/elasticsearch:9.5.2` | `9200:9200` |
 
-All services are intended for local personal development. Review the Compose configuration and local credentials before starting them.
+所有服务都面向远程个人开发，默认绑定所有网络接口。启动前请检查 Compose 配置、本地凭据以及云安全组和主机防火墙规则。
