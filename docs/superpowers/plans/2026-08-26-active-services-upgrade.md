@@ -306,7 +306,7 @@ from pathlib import Path
 dockerfile = Path('setup/nginx/Dockerfile').read_text()
 conf = Path('setup/nginx/conf/upstream.conf').read_text()
 assert 'FROM nginx:1.30.4-trixie' in dockerfile
-assert 'server_name                    feiwenchao.me;' in conf
+assert 'server_name                    feiwenchao.com;' in conf
 assert 'proxy_set_header X-Real-IP' not in conf
 assert 'uwsgi_param HTTP_X_REAL_IP $remote_addr;' in conf
 PY
@@ -329,7 +329,7 @@ Do not change unrelated content-copy behavior in this task.
 Make these exact semantic changes:
 
 ```nginx
-server_name                    feiwenchao.me;
+server_name                    feiwenchao.com;
 ```
 
 Delete the commented `ssl off` line. Replace the ineffective proxy directives in `location /` with:
@@ -352,7 +352,7 @@ from pathlib import Path
 dockerfile = Path('setup/nginx/Dockerfile').read_text()
 conf = Path('setup/nginx/conf/upstream.conf').read_text()
 assert 'FROM nginx:1.30.4-trixie' in dockerfile
-assert 'server_name                    feiwenchao.me;' in conf
+assert 'server_name                    feiwenchao.com;' in conf
 assert 'proxy_set_header X-Real-IP' not in conf
 assert 'uwsgi_param HTTP_X_REAL_IP $remote_addr;' in conf
 assert 'uwsgi_param HTTP_X_FORWARDED_PROTO $scheme;' in conf
@@ -380,7 +380,7 @@ Expected: build succeeds; `nginx -t` reports syntax successful and test successf
 docker compose up -d nginx
 docker compose ps nginx
 curl -I http://127.0.0.1/
-curl -Ik https://127.0.0.1/ -H 'Host: feiwenchao.me'
+curl -Ik https://127.0.0.1/ -H 'Host: feiwenchao.com'
 ```
 
 Expected: service becomes healthy; HTTP redirects to HTTPS; HTTPS reaches Nginx. `-k` tests transport only and does not validate the repository certificate.
@@ -940,7 +940,7 @@ Repeat Task 6 checks and additionally:
 ```bash
 docker compose run --rm nginx nginx -t
 curl -I http://127.0.0.1/
-curl -Ik https://127.0.0.1/ -H 'Host: feiwenchao.me'
+curl -Ik https://127.0.0.1/ -H 'Host: feiwenchao.com'
 ```
 
 Expected: all four services healthy; component versions match; authenticated checks pass; Nginx syntax passes. If Docker remains unavailable, state that runtime verification was skipped and do not claim the stack is operational.

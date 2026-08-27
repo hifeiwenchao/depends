@@ -54,7 +54,7 @@ docker compose ps
 docker compose ps
 docker compose run --rm nginx nginx -t
 curl -I http://127.0.0.1/
-curl -Ik https://127.0.0.1/ -H 'Host: feiwenchao.me'
+curl -Ik https://127.0.0.1/ -H 'Host: feiwenchao.com'
 ```
 
 HTTP 请求可能会重定向到 HTTPS。HTTPS 根请求依赖配置的外部 uWSGI 上游；当该上游不可用时请求可能超时，但这本身不能说明 Nginx 未能接受 HTTPS。使用已知的本地静态路径，可以区分 Nginx 传输层/配置问题和上游可用性。除本地 `-k` 冒烟测试选项外，不要禁用证书验证。从远程客户端验证时，将示例中的 `127.0.0.1` 替换为服务器的 DNS 名称或 IP 地址。确认宿主机的发布端口为 `80`、`443`、`3306`、`6379`、`27017`、`5672`、`15672` 和 `9200`，并且这些端口默认绑定所有网络接口。RabbitMQ 的 Prometheus 端口 `15692` 保持为容器内部端口，Elasticsearch 传输端口 `9300` 不得发布到主机。
