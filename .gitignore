@@ -17,6 +17,7 @@
 /setup/nginx/data/download/*
 docker-compose-dev.yml
 !.gitkeep
+/setup/redis/data/.gitkeep
 .DS_Store
 **/.DS_Store
 .env
