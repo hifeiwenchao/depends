@@ -28,6 +28,28 @@ MySQL 仅在初始化空的 `setup/mysql/data/` 时应用 `MYSQL_ROOT_PASSWORD`�
 
 RabbitMQ 首次以空数据目录启动时，会创建配置的用户并使用默认 `/` vhost；它不会创建特定于应用的 vhost。RabbitMQ 引导环境变量只在初始化期间生效，因此之后修改它们不会轮换持久化在 broker 数据中的凭据。Elasticsearch 同样只在初始化空数据时应用 `ELASTIC_PASSWORD`。对于已初始化的集群，修改环境变量不会轮换内置 `elastic` 密码；请改用 `elasticsearch-reset-password`。
 
+## Linux 开发工具安装
+
+`scripts/install-tools.sh` 用于在 Debian/Ubuntu、Fedora/RHEL/CentOS 或 Arch Linux 上安装稳定版 Git、zsh、Node.js/npm、Supervisor、Miniconda、Docker Engine 和 Docker Compose。脚本需要 root 或 `sudo`，默认会为当前执行用户设置 Oh My Zsh 和 Miniconda，并将目标用户的默认登录 shell 设置为 zsh；如果以 root 执行，也可以直接安装到 root 用户环境：
+
+```bash
+TARGET_USER="$USER" bash scripts/install-tools.sh --dry-run
+sudo env TARGET_USER="$USER" bash scripts/install-tools.sh
+```
+
+脚本使用 Docker 官方 `stable` 软件源；如果检测到 `docker` 命令和 `docker compose version` 都可用，会跳过 Docker 软件包和仓库下载，只执行服务启用及用户组处理；设置 `DOCKER_REINSTALL=1` 可强制重新安装。APT 和 Arch 使用系统包安装 Supervisor；Rocky/RHEL/Fedora 在系统仓库没有 Supervisor 时使用 Python 3 pip 安装 PyPI 稳定版，可通过 `SUPERVISOR_VERSION` 固定版本。安装完成后会生成 `/etc/supervisord.conf`、`/etc/supervisord.d/*.ini` 配置目录和 `/etc/systemd/system/supervisord.service`，自动启用并启动服务；Supervisor 的 HTTP 控制端点只监听 `127.0.0.1:9001`，可直接执行 `supervisorctl status` 查看用户程序。已有的 Supervisor 配置会保留，不会被脚本覆盖。APT 环境可以通过 `DOCKER_CE_VERSION` 固定 Docker CE 包版本。Rocky/RHEL 系统会先用 `curl` 下载 RPM 仓库定义，并默认让 DNF/YUM 使用 IPv4（`DOCKER_RPM_IP_RESOLVE=4`）、单线程下载（`DOCKER_RPM_MAX_PARALLEL_DOWNLOADS=1`）、120 秒超时、10 次重试和关闭 fastestmirror，以规避部分主机到 Docker CDN 的连接重置问题；这些参数都可通过同名环境变量覆盖（`auto` 会映射到 DNF/YUM 的 `whatever` 模式）。脚本会输出明确的 DNS/TLS/代理错误；如果服务器无法访问 Docker 官方站点，可通过 `DOCKER_RPM_REPO_URL` 指向已批准的 HTTPS 镜像。Miniconda 默认使用官方稳定通道 `latest` 安装器，并从官方目录索引提取并校验对应安装器的 SHA-256；如需固定目标版本，可通过 `MINICONDA_VERSION` 指定版本，通过 `MINICONDA_PREFIX` 覆盖安装目录。若需可审计复现，请另外记录并校验该版本的固定 SHA-256。官方移除某个指定版本后，下载会失败并显示对应的完整 installer/checksum URL（通常表现为 HTTP 404）。Oh My Zsh 会安装 `zsh-syntax-highlighting` `0.8.0`、`zsh-autosuggestions` `v0.7.1` 和 Powerlevel10k `v1.20.0`，复制官方 lean Prompt 配置到 `~/.p10k.zsh`，并在 `~/.zshrc` 中追加受标记管理的主题/插件加载块；版本可分别通过 `ZSH_SYNTAX_HIGHLIGHTING_REF`、`ZSH_AUTOSUGGESTIONS_REF` 和 `POWERLEVEL10K_REF` 覆盖。重复运行会保留已有的 Oh My Zsh、`.zshrc`、已有 Supervisor 配置和 Miniconda 配置。Docker 安装完成后需要重新登录，使新的 `docker` 用户组权限生效。
+
+如需卸载这些开发工具，使用 `scripts/uninstall-tools.sh`。脚本会先显示范围并要求输入 `REMOVE DEV TOOLS`；默认保留 Docker 镜像、容器、卷、构建缓存、Docker 软件源、`.oh-my-zsh` 和 `.p10k.zsh`，也不会删除 `setup/` 下的 Compose 数据。确认环境不再需要这些数据和用户配置时，可执行：
+
+```bash
+sudo env TARGET_USER="$USER" bash scripts/uninstall-tools.sh \
+  --purge-user-config --purge-docker-data --remove-docker-repo
+```
+
+`--dry-run` 可先预览操作；`--purge-docker-data` 会永久删除 `/var/lib/docker` 和 `/var/lib/containerd`，请勿与项目数据重置流程混用。
+
+卸载时会先停止并禁用 `supervisord`，删除脚本生成的 systemd 单元和带管理标记的 `/etc/supervisord.conf`；用户自行创建的 Supervisor 配置会保留。
+
 ## 启动
 
 先验证渲染后的 Compose 配置，拉取官方 Nginx 镜像，然后按安全的依赖顺序启动服务：
