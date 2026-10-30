@@ -23,6 +23,7 @@ DOCKER_RPM_MAX_PARALLEL_DOWNLOADS="${DOCKER_RPM_MAX_PARALLEL_DOWNLOADS:-1}"
 DOCKER_RPM_TIMEOUT="${DOCKER_RPM_TIMEOUT:-120}"
 DOCKER_RPM_RETRIES="${DOCKER_RPM_RETRIES:-10}"
 DOCKER_REINSTALL="${DOCKER_REINSTALL:-0}"
+DOCKER_REGISTRY_MIRROR="${DOCKER_REGISTRY_MIRROR-https://docker.m.daocloud.io}"
 CURL_RETRY_ARGS=(--retry 3)
 readonly SUPERVISOR_UNIT_FILE="/etc/systemd/system/supervisord.service"
 readonly SUPERVISOR_CONFIG_MARKER_START="; >>> depends-dev-tools supervisor >>>"
@@ -60,6 +61,8 @@ Environment overrides:
   DOCKER_RPM_TIMEOUT DNF/YUM network timeout in seconds; default: 120.
   DOCKER_RPM_RETRIES DNF/YUM retry count for failed downloads; default: 10.
   DOCKER_REINSTALL    Set to 1 to reinstall Docker even when Engine and Compose exist.
+  DOCKER_REGISTRY_MIRROR Docker Hub registry mirror; default: https://docker.m.daocloud.io.
+                       Set to an empty value to leave Docker Hub registry settings unchanged.
 
 The script supports Debian/Ubuntu (APT), Fedora/RHEL/CentOS (DNF/YUM),
 and Arch Linux (Pacman). It sets TARGET_USER's default login shell to zsh.
@@ -191,6 +194,12 @@ validate_options() {
     die "DOCKER_REINSTALL must be 0 or 1"
   [[ "$SUPERVISOR_CONFIG" != *[[:space:]]* ]] ||
     die "SUPERVISOR_CONFIG must not contain whitespace"
+  if [[ -n "$DOCKER_REGISTRY_MIRROR" ]]; then
+    [[ "$DOCKER_REGISTRY_MIRROR" == https://* ]] ||
+      die "DOCKER_REGISTRY_MIRROR must use HTTPS or be empty"
+    [[ "$DOCKER_REGISTRY_MIRROR" != *[[:space:]]* ]] ||
+      die "DOCKER_REGISTRY_MIRROR must not contain whitespace"
+  fi
 }
 
 install_docker_apt_repository() {
@@ -225,7 +234,7 @@ install_apt() {
   local docker_packages
   root_cmd env DEBIAN_FRONTEND=noninteractive apt-get update
   root_cmd env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    ca-certificates curl gnupg git zsh nodejs npm supervisor
+    ca-certificates curl gnupg git zsh nodejs npm python3 supervisor
   configure_curl_retry_args
 
   if docker_tools_available; then
@@ -316,7 +325,7 @@ install_dnf_or_yum() {
 
 install_pacman() {
   root_cmd pacman --noconfirm --needed -Sy \
-    ca-certificates curl git zsh nodejs npm supervisor
+    ca-certificates curl git zsh nodejs npm python supervisor
   configure_curl_retry_args
   if docker_tools_available; then
     log 'Docker Engine and Compose already installed; skipping Docker package installation'
@@ -347,6 +356,95 @@ install_system_packages() {
       die "unsupported Linux distribution: $OS_ID (supported: Debian, Ubuntu, Fedora, RHEL/CentOS, Arch)"
       ;;
   esac
+}
+
+configure_docker_registry_mirror() {
+  local daemon_config=/etc/docker/daemon.json
+  local daemon_directory generated_config backup_config
+
+  if [[ -z "$DOCKER_REGISTRY_MIRROR" ]]; then
+    log 'Docker registry mirror configuration disabled (DOCKER_REGISTRY_MIRROR is empty)'
+    return
+  fi
+
+  daemon_directory="$(dirname "$daemon_config")"
+  root_cmd install -d -m 0755 "$daemon_directory"
+
+  if (( DRY_RUN )); then
+    log "[dry-run] merge registry-mirrors [$DOCKER_REGISTRY_MIRROR] into $daemon_config"
+    log '[dry-run] back up daemon.json, reload systemd, and restart Docker'
+    return
+  fi
+
+  [[ ! -L "$daemon_config" ]] || die "refusing symlink Docker daemon configuration: $daemon_config"
+  if [[ -e "$daemon_config" && ! -f "$daemon_config" ]]; then
+    die "Docker daemon configuration is not a regular file: $daemon_config"
+  fi
+
+  generated_config="$(mktemp)"
+  if ! root_cmd python3 - "$daemon_config" "$DOCKER_REGISTRY_MIRROR" >"$generated_config" <<'PY'
+import json
+import pathlib
+import sys
+
+config_path = pathlib.Path(sys.argv[1])
+mirror = sys.argv[2]
+data = {}
+if config_path.exists():
+    try:
+        data = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"cannot parse Docker daemon configuration {config_path}: {exc}")
+    if not isinstance(data, dict):
+        raise SystemExit(f"Docker daemon configuration must contain a JSON object: {config_path}")
+
+mirrors = data.get("registry-mirrors", [])
+if not isinstance(mirrors, list) or any(not isinstance(item, str) for item in mirrors):
+    raise SystemExit('Docker daemon "registry-mirrors" must be a JSON array of strings')
+if mirror not in mirrors:
+    mirrors.append(mirror)
+data["registry-mirrors"] = mirrors
+print(json.dumps(data, indent=2, ensure_ascii=False))
+PY
+  then
+    rm -f "$generated_config"
+    die "could not prepare Docker daemon registry mirror configuration"
+  fi
+
+  if root_cmd cmp -s "$generated_config" "$daemon_config"; then
+    rm -f "$generated_config"
+    log "Docker registry mirror already configured: $DOCKER_REGISTRY_MIRROR"
+    return
+  fi
+
+  backup_config="${daemon_config}.bak"
+  if [[ -e "$backup_config" ]]; then
+    backup_config="${daemon_config}.bak.$(date -u +%Y%m%d%H%M%S)"
+  fi
+  if [[ -e "$daemon_config" ]]; then
+    [[ ! -L "$backup_config" ]] || die "refusing symlink Docker daemon backup: $backup_config"
+    root_cmd cp -a -- "$daemon_config" "$backup_config"
+    log "backed up Docker daemon configuration to $backup_config"
+  fi
+  root_cmd install -m 0644 "$generated_config" "$daemon_config"
+  rm -f "$generated_config"
+
+  if command -v systemctl >/dev/null 2>&1; then
+    root_cmd systemctl daemon-reload
+    if ! root_cmd systemctl restart docker; then
+      log "Docker restart failed; restoring the previous daemon configuration" >&2
+      if [[ -e "$backup_config" ]]; then
+        root_cmd cp -a -- "$backup_config" "$daemon_config"
+        root_cmd systemctl restart docker || true
+      else
+        root_cmd rm -f -- "$daemon_config"
+      fi
+      die 'Docker did not restart after registry mirror configuration'
+    fi
+    log "configured Docker registry mirror: $DOCKER_REGISTRY_MIRROR"
+  else
+    log "configured Docker registry mirror: $DOCKER_REGISTRY_MIRROR (systemctl unavailable; restart Docker manually)"
+  fi
 }
 
 supervisor_available() {
@@ -713,6 +811,7 @@ main() {
 
   log "Installing stable development tools for $TARGET_USER on $OS_ID"
   install_system_packages
+  configure_docker_registry_mirror
   install_supervisor
   configure_supervisor
   set_default_shell

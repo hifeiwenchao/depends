@@ -125,6 +125,20 @@ services:
     networks:
       - main
 
+  elasticsearch-permissions:
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.5.2
+    user: "0:0"
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - >-
+        install -d -m 0770 -o 1000 -g 0 /usr/share/elasticsearch/data &&
+        chown -R 1000:0 /usr/share/elasticsearch/data
+    volumes:
+      - ./setup/elasticsearch/data:/usr/share/elasticsearch/data
+    restart: "no"
+    networks:
+      - main
+
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:9.5.2
     ports:
@@ -134,6 +148,9 @@ services:
       - ./setup/elasticsearch/data:/usr/share/elasticsearch/data
     mem_limit: 1g
     restart: unless-stopped
+    depends_on:
+      elasticsearch-permissions:
+        condition: service_completed_successfully
     environment:
       ELASTIC_PASSWORD: ${ELASTIC_PASSWORD:?ELASTIC_PASSWORD is required}
       TZ: ${TZ:-Asia/Shanghai}
