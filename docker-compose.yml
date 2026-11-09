@@ -22,7 +22,7 @@ services:
       start_period: 10s
     logging: *default-logging
     networks:
-      - main
+      - proxy
 
   mysql:
     image: mysql:9.7.2
@@ -166,3 +166,5 @@ services:
 
 networks:
   main:
+  proxy:
+    name: depends_proxy

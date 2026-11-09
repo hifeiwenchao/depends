@@ -1,6 +1,6 @@
 # depends
 
-用于远程主机上的个人开发服务栈。本配置使用 Compose 的简写端口映射（例如 `80:80`），默认将已发布的服务端口绑定到所有宿主机网络接口，允许外部客户端访问；仍**不适用于生产环境**。操作者必须控制 Docker 主机及其网络边界。
+用于远程主机上的个人开发服务栈，提供 NGINX、MySQL、Redis、MongoDB、RabbitMQ 和 Elasticsearch。多个项目共用本 Compose 的 NGINX 容器作为统一入口，各项目自行维护站点配置，部署时放入 `setup/nginx/conf/conf.d/`。本配置使用 Compose 的简写端口映射（例如 `80:80`），默认将已发布的服务端口绑定到所有宿主机网络接口，允许外部客户端访问；仍**不适用于生产环境**。操作者必须控制 Docker 主机及其网络边界。
 
 ## 环境要求
 
@@ -20,7 +20,7 @@ cp .env.example .env
 
 在 `.env` 中设置以下本地凭据：`MYSQL_ROOT_PASSWORD`、`MYSQL_PASSWORD`、`REDIS_PASSWORD`、`MONGO_INITDB_ROOT_PASSWORD`、`RABBITMQ_DEFAULT_PASS` 和 `ELASTIC_PASSWORD`。每个密码都必须使用 URL 安全字符集 `[A-Za-z0-9._~-]+` 生成；验证示例会将 `.env` 作为 POSIX shell 脚本加载，Redis ACL 生成也会强制使用同一字符集。`RABBITMQ_DEFAULT_USER` 默认为 `dev`；对于普通的容器网络客户端，不要使用 `guest`。将 `.env` 保留在本地：不要提交它，也不要把凭据粘贴到 issue 或聊天记录中。不要暴露或分享其内容。
 
-此配置会将 MySQL、Redis、MongoDB、RabbitMQ AMQP/Management 和 Elasticsearch HTTP 端口发布到所有网络接口。Compose 中省略宿主机 IP 的映射（例如 `80:80`）等价于 IPv4 的 `0.0.0.0:80:80`。请在云安全组和主机防火墙中限制来源 IP；不要把这些端口直接暴露给不受信任的公网。远程访问必须使用强凭据；生产环境还应通过 VPN、反向代理或其他受控网络边界提供 TLS 和访问控制。
+此配置会将 MySQL、Redis、MongoDB、RabbitMQ AMQP/Management 和 Elasticsearch HTTP 端口发布到所有网络接口。Compose 中省略宿主机 IP 的映射（例如 `3306:3306`）等价于 IPv4 的 `0.0.0.0:3306:3306`。请在云安全组和主机防火墙中限制来源 IP；不要把这些端口直接暴露给不受信任的公网。远程访问必须使用强凭据；生产环境还应通过 VPN、反向代理或其他受控网络边界提供 TLS 和访问控制。
 
 Compose 文件**不会自动创建 MySQL 应用数据库**。如果应用需要，请在 MySQL 健康运行后显式创建应用数据库。
 
@@ -50,24 +50,141 @@ sudo env TARGET_USER="$USER" bash scripts/uninstall-tools.sh \
 
 卸载时会先停止并禁用 `supervisord`，删除脚本生成的 systemd 单元和带管理标记的 `/etc/supervisord.conf`；用户自行创建的 Supervisor 配置会保留。
 
+## 多项目共用 Compose NGINX
+
+本项目负责统一运行 `nginx:1.30.4-trixie` 和管理公共配置，各应用项目负责自己的域名、路由及上游配置。部署关系如下：
+
+| 内容 | 维护位置 | 部署位置 |
+| --- | --- | --- |
+| NGINX 主配置 | 本仓库 `setup/nginx/conf/nginx.conf` | 容器 `/etc/nginx/nginx.conf` |
+| 项目 A 站点配置 | 项目 A 仓库，例如 `deploy/nginx.conf` | `setup/nginx/conf/conf.d/project-a.conf` |
+| 项目 B 站点配置 | 项目 B 仓库，例如 `deploy/nginx.conf` | `setup/nginx/conf/conf.d/project-b.conf` |
+
+整个 `setup/nginx/conf/` 目录只读挂载到容器 `/etc/nginx/`，主配置会加载 `conf.d/*.conf`。`default.conf` 是本项目维护的通用欢迎页；`sudothink.conf` 已删除，本仓库不再维护具体应用的代理配置。部署进来的其他 `.conf` 已加入 `.gitignore`，其源文件应在各自项目仓库中版本管理。旧的 `setup/nginx/html`、`static`、`media` 和 `ssl` 目录仍保留，默认不挂载。
+
+### 共享网络与部署顺序
+
+NGINX 使用固定名称的 Docker 网络 `depends_proxy`，由本 Compose 创建；中间件继续使用 `main` 网络。先启动统一入口以创建共享网络：
+
+```bash
+cd /opt/apps/depends
+docker compose config --quiet
+docker compose up -d --wait --wait-timeout 60 nginx
+```
+
+各项目在自己的 Compose 中声明该网络为 external，并为 Web/API 服务设置唯一的网络别名。以下为项目 A 的配置片段，合并到该项目原有的 `image` 或 `build` 等配置中；假设应用在容器内监听 `0.0.0.0:8000`：
+
+```yaml
+services:
+  web:
+    networks:
+      proxy:
+        aliases:
+          - project-a-web
+
+networks:
+  proxy:
+    external: true
+    name: depends_proxy
+```
+
+若应用还有自己的数据库网络，可同时保留该网络，仅将对外提供 HTTP 的服务加入 `depends_proxy`。应用不需要发布宿主机的 HTTP 端口，也不要再占用宿主机 `80/443`；NGINX 通过 `project-a-web:8000` 访问容器内的端口。各项目的网络别名、NGINX upstream 名和域名均须唯一，不要共用 `web` 等泛化上游名称。
+
+### 各项目维护的站点配置
+
+项目 A 可将下例保存为自己仓库的 `deploy/nginx.conf`，部署时改名为 `project-a.conf`。将域名、别名和端口替换为实际值：
+
+```nginx
+upstream project_a_web {
+    zone project_a_web 64k;
+    resolver 127.0.0.11 valid=10s ipv6=off;
+    server project-a-web:8000 resolve;
+}
+
+server {
+    listen 80;
+    server_name project-a.example.com;
+
+    client_max_body_size 20m;
+
+    location / {
+        proxy_pass http://project_a_web;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+固定镜像版本支持上述动态 DNS 配置：`127.0.0.11` 是 Docker 内置 DNS，`resolve` 会更新重建后的应用容器地址。某个应用尚未启动时，其站点暂时返回 `502`，不会因为上游域名不存在而阻止整个 NGINX 启动。NGINX 健康检查验证配置是否有效，应用健康仍需单独检查。
+
+容器中的 `127.0.0.1` 指向 NGINX 容器自身，不能沿用宿主机 NGINX 的 `proxy_pass http://127.0.0.1:8081`。本示例适用于 Docker 应用；直接运行在宿主机的应用需另行配置从容器可访问的宿主机地址和应用监听地址。
+
+### 投放配置与重载
+
+先启动项目上游，再从项目仓库复制配置到远端的统一目录。更新已有站点前先将原文件备份为 `.conf.bak` 等不以 `.conf` 结尾的文件；每次只操作本项目自己的文件，不要清空整个 `conf.d` 或覆盖其他项目配置。
+
+在远端执行以下示例，源路径按应用的实际部署位置替换：
+
+```bash
+cd /opt/apps/depends
+# 更新已有站点时，先备份当前配置。
+if [ -f setup/nginx/conf/conf.d/project-a.conf ]; then
+  cp -p setup/nginx/conf/conf.d/project-a.conf setup/nginx/conf/conf.d/project-a.conf.bak
+fi
+# 先写入不参与加载的临时文件，再在同一目录内原子替换。
+install -m 0644 /opt/apps/project-a/deploy/nginx.conf setup/nginx/conf/conf.d/project-a.conf.next &&
+mv setup/nginx/conf/conf.d/project-a.conf.next setup/nginx/conf/conf.d/project-a.conf &&
+docker compose exec -T nginx nginx -t &&
+docker compose exec -T nginx nginx -s reload
+```
+
+只有配置检查通过才重载。检查失败时，恢复该站点的备份；如果是首次添加，将新文件移出 `conf.d`，然后重新检查。运行中的 worker 会继续使用上次已加载的配置，不要在恢复前重启 NGINX。删除应用时也只移走对应的 `.conf`，检查通过后重载。
+
+将真实域名的 DNS 记录指向服务器，并验证对应站点，例如：
+
+```bash
+curl --fail --silent --show-error -H 'Host: project-a.example.com' http://127.0.0.1/ >/dev/null
+docker compose logs --tail=50 nginx
+```
+
+示例验证假设应用存在 `/` 路由，API 请改为实际健康检查路径。WebSocket、静态文件和超时等设置由各项目自行维护；静态文件路径和证书路径必须在容器内可访问。
+
+当前 Compose 只发布 `80:80`，默认欢迎页和示例站点均为 HTTP。如需 HTTPS，在本项目 NGINX 服务中增加 `443:443` 和证书目录的只读挂载，再由各项目配置对应的 `listen 443 ssl` 和有效证书。修改端口或挂载后需重建 NGINX 容器，不能只 reload；公共配置随镜像版本更新时，也须保留已部署的项目站点文件。
+
+### 从宿主机 NGINX 切回容器
+
+如果此前已安装并启动宿主机 NGINX，先检查容器配置，再停用宿主机服务以释放端口，只启动本项目的 NGINX：
+
+```bash
+cd /opt/apps/depends
+docker compose config --quiet
+docker compose run --rm --no-deps nginx nginx -t
+sudo systemctl disable --now nginx
+docker compose up -d --wait --wait-timeout 60 nginx
+curl --fail --silent --show-error http://127.0.0.1/ >/dev/null
+```
+
+全新部署无需执行停用宿主机服务的步骤。若切换失败，先执行 `docker compose stop nginx` 释放端口，再执行 `sudo systemctl enable --now nginx` 恢复原入口。切换不需要停止或重建数据库，也不删除 `/etc/nginx/` 和 `setup/` 下的文件。
+
 ## 启动
 
-先验证渲染后的 Compose 配置，拉取官方 Nginx 镜像，然后按安全的依赖顺序启动服务：
+先验证渲染后的 Compose 配置，启动共享 NGINX，再逐个启动中间件：
 
 ```bash
 docker compose config --quiet
-docker compose pull nginx
+docker compose up -d --wait --wait-timeout 60 nginx
 docker compose up -d redis
 docker compose up -d mongo
 docker compose up -d mysql
-docker compose up -d nginx
-docker compose up -d --no-deps --force-recreate --wait --wait-timeout 60 nginx
 docker compose up -d rabbitmq
 docker compose up -d elasticsearch
 docker compose ps
 ```
 
-按上述顺序逐个启动并验证有状态服务；等待每个服务变为 healthy 后再继续。启动 Elasticsearch 时，Compose 会先运行 `elasticsearch-permissions` 一次性初始化服务，以 root 身份将 `setup/elasticsearch/data/` 设置为容器用户 `1000:0` 可写，然后再启动 Elasticsearch；该服务不会删除或重建已有数据。Nginx 直接使用官方 `nginx:1.30.4-trixie` 镜像，不执行本地镜像构建。其他服务使用下方列出的精确版本。六个业务服务都应处于运行状态，并最终报告 `healthy`。
+按上述顺序逐个启动并验证有状态服务；等待每个服务变为 healthy 后再继续。启动 Elasticsearch 时，Compose 会先运行 `elasticsearch-permissions` 一次性初始化服务，以 root 身份将 `setup/elasticsearch/data/` 设置为容器用户 `1000:0` 可写，然后再启动 Elasticsearch；该服务不会删除或重建已有数据。六个业务服务使用下方列出的精确版本，都应处于运行状态，并最终报告 `healthy`；权限初始化服务显示 `Exited (0)` 属于正常状态。
 
 ## 验证
 
@@ -75,19 +192,11 @@ docker compose ps
 
 ```bash
 docker compose ps
-docker compose run --rm --no-deps nginx nginx -t
-curl --fail --silent --show-error http://127.0.0.1/ | grep -F 'Welcome to nginx!'
+docker compose exec -T nginx nginx -t
+curl --fail --silent --show-error http://127.0.0.1/ >/dev/null
 ```
 
-Nginx 通过 HTTP 提供官方镜像欢迎页，没有 HTTPS 监听器，也不再依赖应用上游。从远程客户端验证时，将示例中的 `127.0.0.1` 替换为服务器的 DNS 名称或 IP 地址。确认宿主机的发布端口为 `80`、`3306`、`6379`、`27017`、`5672`、`15672` 和 `9200`，并且这些端口默认绑定所有网络接口。RabbitMQ 的 Prometheus 端口 `15692` 保持为容器内部端口，Elasticsearch 传输端口 `9300` 不得发布到主机。
-
-Nginx 使用以下本地映射；配置目录以只读方式完整挂载：
-
-```text
-setup/nginx/conf/ -> /etc/nginx (read-only)
-```
-
-该本地树是 `nginx:1.30.4-trixie` 的精确快照；镜像标签变更时必须刷新该树。
+确认 Compose 发布的宿主机端口为 `80`、`3306`、`6379`、`27017`、`5672`、`15672` 和 `9200`，并且这些端口默认绑定所有网络接口。RabbitMQ 的 Prometheus 端口 `15692` 保持为容器内部端口，Elasticsearch 传输端口 `9300` 不得发布到主机。默认 NGINX 提供官方欢迎页，添加站点后还需按域名单独验证转发。
 
 进行组件检查时，请使用经过身份验证的命令，并避免将密码写入 shell 历史或日志。示例：
 
@@ -106,7 +215,7 @@ curl --fail --silent --show-error --user "elastic:$ELASTIC_PASSWORD" 'http://127
 unset REDIS_PASSWORD MYSQL_ROOT_PASSWORD MYSQL_PASSWORD MONGO_INITDB_ROOT_PASSWORD RABBITMQ_DEFAULT_PASS ELASTIC_PASSWORD
 ```
 
-Redis 应返回 `PONG`；MySQL 应报告其正在运行；MongoDB 应成功响应 ping 命令。RabbitMQ 应通过 broker 诊断，并且其经过身份验证的管理 API 已发布到宿主机所有网络接口的 `15672` 端口。Elasticsearch 应在 `http://服务器地址:9200` 上要求 `elastic` 密码，并达到黄色或绿色的单节点集群健康状态。当前 Elasticsearch 使用明文 HTTP；远程部署时必须通过防火墙、VPN 或反向代理限制访问，生产环境应启用 TLS。确认报告的组件版本与下方版本一致，并在使用该服务栈前确认六个 Compose 服务都处于 healthy 状态。
+Redis 应返回 `PONG`；MySQL 应报告其正在运行；MongoDB 应成功响应 ping 命令。RabbitMQ 应通过 broker 诊断，并且其经过身份验证的管理 API 已发布到宿主机所有网络接口的 `15672` 端口。Elasticsearch 应在 `http://服务器地址:9200` 上要求 `elastic` 密码，并达到黄色或绿色的单节点集群健康状态。当前 Elasticsearch 使用明文 HTTP；远程部署时必须通过防火墙、VPN 或反向代理限制访问，生产环境应启用 TLS。确认报告的组件版本与下方版本一致，并在使用该服务栈前确认六个业务服务都处于 healthy 状态。
 
 RabbitMQ 使用以下本地映射：
 
@@ -198,11 +307,11 @@ PY
 
 | 服务 | 镜像或基础镜像 | 宿主机端口映射 |
 | --- | --- | --- |
-| Nginx | `nginx:1.30.4-trixie` | `80:80` |
+| NGINX | `nginx:1.30.4-trixie` | `80:80` |
 | Redis | `redis:8.10.1` | `6379:6379` |
 | MySQL | `mysql:9.7.2` | `3306:3306` |
 | MongoDB | `mongo:8.3.8-noble` | `27017:27017` |
 | RabbitMQ | `rabbitmq:4.3.5-management` | `5672:5672`、`15672:15672` |
 | Elasticsearch | `docker.elastic.co/elasticsearch/elasticsearch:9.5.2` | `9200:9200` |
 
-所有服务都面向远程个人开发，默认绑定所有网络接口。启动前请检查 Compose 配置、本地凭据以及云安全组和主机防火墙规则。
+所有服务都面向远程个人开发，已发布的端口默认绑定所有网络接口。应用通过共享网络接入 NGINX，不会改变本项目中间件端口的访问范围。启动前请检查 Compose 配置、本地凭据以及云安全组和主机防火墙规则。
