@@ -60,7 +60,7 @@ sudo env TARGET_USER="$USER" bash scripts/uninstall-tools.sh \
 | 项目 A 站点配置 | 项目 A 仓库，例如 `deploy/nginx.conf` | `setup/nginx/conf/conf.d/project-a.conf` |
 | 项目 B 站点配置 | 项目 B 仓库，例如 `deploy/nginx.conf` | `setup/nginx/conf/conf.d/project-b.conf` |
 
-整个 `setup/nginx/conf/` 目录只读挂载到容器 `/etc/nginx/`，主配置会加载 `conf.d/*.conf`。`default.conf` 是本项目维护的通用欢迎页；`sudothink.conf` 已删除，本仓库不再维护具体应用的代理配置。部署进来的其他 `.conf` 已加入 `.gitignore`，其源文件应在各自项目仓库中版本管理。旧的 `setup/nginx/html`、`static`、`media` 和 `ssl` 目录仍保留，默认不挂载。
+整个 `setup/nginx/conf/` 目录只读挂载到容器 `/etc/nginx/`，主配置会加载 `conf.d/*.conf`。`default.conf` 是本项目维护的通用欢迎页；项目专用的旧代理配置已删除，本仓库不再维护具体应用的代理配置。部署进来的其他 `.conf` 已加入 `.gitignore`，其源文件应在各自项目仓库中版本管理。旧的 `setup/nginx/html`、`static`、`media` 和 `ssl` 目录仍保留，默认不挂载。
 
 ### 共享网络与部署顺序
 
@@ -152,7 +152,218 @@ docker compose logs --tail=50 nginx
 
 示例验证假设应用存在 `/` 路由，API 请改为实际健康检查路径。WebSocket、静态文件和超时等设置由各项目自行维护；静态文件路径和证书路径必须在容器内可访问。
 
-当前 Compose 只发布 `80:80`，默认欢迎页和示例站点均为 HTTP。如需 HTTPS，在本项目 NGINX 服务中增加 `443:443` 和证书目录的只读挂载，再由各项目配置对应的 `listen 443 ssl` 和有效证书。修改端口或挂载后需重建 NGINX 容器，不能只 reload；公共配置随镜像版本更新时，也须保留已部署的项目站点文件。
+Compose 发布 `80:80` 和 `443:443`，并将 `setup/nginx/certs/` 整个目录只读挂载到 `/etc/ssl/depends/`。默认欢迎页仍只有 HTTP；在证书签发和项目 TLS 配置部署前，容器不会监听 HTTPS。新仓库无需预置证书也能启动。公共配置随镜像版本更新时，须保留已部署的项目站点文件和本地证书。
+
+### Let's Encrypt 通配符证书
+
+`example.com` 与 `*.example.com` 使用同一张证书，后者覆盖 `www.example.com`、`admin.example.com`、`xxx.example.com` 等任意一级子域名。它不覆盖 `a.b.example.com`，也不会自动创建域名的 DNS 记录；每个实际站点仍需配置 A/AAAA 记录及自己的 NGINX 路由。
+
+通配符必须使用 DNS-01 验证。本服务器采用官方 `acme.sh` 的 `dns_ali` 插件，明确指定 Let's Encrypt 签发；阿里云 API 凭据由有域名 DNS 管理权限的 RAM 用户提供，保存在服务器 `/root/.config/acme/aliyun.env`（目录权限 `700`、文件权限 `600`），使用 `Ali_Key` 和 `Ali_Secret` 变量。不要将凭据放入项目 `.env`、站点配置、Git 或日志，也不要在聊天中发送。ACME 账户及续期状态保存在 `/root/.acme.sh/`，仅 root 可访问。
+
+#### 完整的申请、部署和续期流程
+
+以下步骤适用于新服务器。示例固定使用 `acme.sh` `3.1.6`、阿里云 DNS-01、Let's Encrypt 生产 CA、ECC P-256，以及本项目的 `/opt/apps/depends` 路径。命令以 root 执行；如果服务器已有 acme.sh，先执行 `acme.sh --version`，不要覆盖已有账户目录。
+
+1. 安装 acme.sh，并关闭它自带的 cron。续期由后文的 systemd timer 统一管理：
+
+   ```bash
+   set -eu
+   ACME_VERSION=3.1.6
+   ACME_HOME=/root/.acme.sh
+   TMP_DIR=$(mktemp -d)
+   trap 'rm -rf "$TMP_DIR"' EXIT
+   curl --fail --silent --show-error --location --retry 3 \
+     "https://codeload.github.com/acmesh-official/acme.sh/tar.gz/refs/tags/${ACME_VERSION}" \
+     --output "$TMP_DIR/acme.sh.tar.gz"
+   tar -xzf "$TMP_DIR/acme.sh.tar.gz" -C "$TMP_DIR"
+   cd "$TMP_DIR/acme.sh-${ACME_VERSION}"
+   sh ./acme.sh --install --home "$ACME_HOME" --nocron --noprofile
+   chmod 700 "$ACME_HOME"
+   "$ACME_HOME/acme.sh" --version
+   "$ACME_HOME/acme.sh" --uninstall-cronjob --home "$ACME_HOME" || true
+   ```
+
+2. 准备阿里云 RAM 用户凭据。RAM 用户只授予 `example.com` DNS 记录管理权限；文件不要使用 `export`，这样可以同时被 acme.sh 和 systemd `EnvironmentFile` 读取：
+
+   ```bash
+   install -d -m 700 /root/.config/acme
+   cat >/root/.config/acme/aliyun.env <<'EOF'
+   # AliDNS DNS-01 credentials; root-only, do not commit.
+   Ali_Key=YOUR_ALIYUN_ACCESS_KEY_ID
+   Ali_Secret=YOUR_ALIYUN_ACCESS_KEY_SECRET
+   EOF
+   chmod 600 /root/.config/acme/aliyun.env
+   ```
+
+   手动申请前只在当前 shell 中加载凭据，完成后立即清除：
+
+   ```bash
+   set -a
+   . /root/.config/acme/aliyun.env
+   set +a
+   ```
+
+3. 先使用 Let's Encrypt staging CA 测试 DNS 权限。staging 证书不受浏览器信任，且使用独立配置和证书目录，不会污染正式账户：
+
+   ```bash
+   /root/.acme.sh/acme.sh --issue \
+     --server https://acme-staging-v02.api.letsencrypt.org/directory \
+     --dns dns_ali \
+     --home /root/.acme.sh \
+     --config-home /root/.acme-staging \
+     --cert-home /root/.acme-staging/certs \
+     --dnssleep 60 \
+     --keylength ec-256 \
+     -d example.com \
+     -d '*.example.com'
+   ```
+
+   确认输出显示 DNS 验证和签发成功。传播较慢时增加 `--dnssleep`；不要在 staging 失败时反复请求正式证书。
+
+4. 注册 Let's Encrypt 生产账户并申请正式证书：
+
+   ```bash
+   /root/.acme.sh/acme.sh --register-account \
+     --server letsencrypt \
+     -m admin@example.com
+
+   /root/.acme.sh/acme.sh --issue \
+     --server letsencrypt \
+     --dns dns_ali \
+     --home /root/.acme.sh \
+     --dnssleep 60 \
+     --keylength ec-256 \
+     -d example.com \
+     -d '*.example.com'
+   unset Ali_Key Ali_Secret
+   ```
+
+   生产证书保存在 `/root/.acme.sh/example.com_ecc/`。必须确认 CA、域名和有效期：
+
+   ```bash
+   openssl x509 -in /root/.acme.sh/example.com_ecc/fullchain.cer \
+     -noout -issuer -dates -ext subjectAltName
+   ```
+
+   输出应包含 `DNS:example.com`、`DNS:*.example.com` 和 Let's Encrypt 签发者；如果出现 `STAGING`，不要部署到生产 NGINX。
+
+5. 把证书复制到项目的 Git 忽略目录，并记录续期后的 NGINX reload 命令。`--install-cert` 会立即执行一次 reload 命令，因此应先确保 Compose NGINX 已启动；证书目录必须使用整体目录挂载：
+
+   ```bash
+   CERT_DIR=/opt/apps/depends/setup/nginx/certs/example.com
+   install -d -m 700 "$CERT_DIR"
+   /root/.acme.sh/acme.sh --install-cert \
+     --home /root/.acme.sh \
+     --ecc \
+     -d example.com \
+     --key-file "$CERT_DIR/privkey.pem" \
+     --fullchain-file "$CERT_DIR/fullchain.pem" \
+     --reloadcmd 'docker compose --project-directory /opt/apps/depends -f /opt/apps/depends/docker-compose.yml exec -T nginx nginx -t && docker compose --project-directory /opt/apps/depends -f /opt/apps/depends/docker-compose.yml exec -T nginx nginx -s reload'
+   chmod 600 "$CERT_DIR/privkey.pem"
+   chmod 644 "$CERT_DIR/fullchain.pem"
+   ```
+
+   NGINX 容器内的证书路径是 `/etc/ssl/depends/example.com/`。各项目把自己的 TLS 站点配置部署到 `setup/nginx/conf/conf.d/`，然后检查并 reload：
+
+   ```bash
+   cd /opt/apps/depends
+   docker compose exec -T nginx nginx -t
+   docker compose exec -T nginx nginx -s reload
+   ```
+
+   首次增加 `443:443`、证书挂载或 TLS 默认站点时才需要 `docker compose up -d --force-recreate --no-deps nginx`；仅替换证书文件不需要重建容器。
+
+6. 手动续期时不要使用 `--force` 作为日常命令。普通续期会在证书未接近到期时跳过；`--force` 只用于专门测试续期链路：
+
+   ```bash
+   set -a
+   . /root/.config/acme/aliyun.env
+   set +a
+   /root/.acme.sh/acme.sh --renew-all --home /root/.acme.sh
+   # 只续期本证书：
+   # /root/.acme.sh/acme.sh --renew -d example.com --ecc --home /root/.acme.sh
+   # 强制测试（会消耗 CA/DNS 请求额度）：
+   # /root/.acme.sh/acme.sh --renew -d example.com --ecc --force --home /root/.acme.sh
+   unset Ali_Key Ali_Secret
+   ```
+
+   直接执行 `--renew` 时，未到续期时间可能返回代码 `2` 表示跳过；systemd 使用的 `--cron` 会把这种正常跳过视为成功。续期成功后，`--install-cert` 保存的 reload hook 会安装新文件、执行 `nginx -t`，再 reload NGINX。
+
+签发后通过 `acme.sh --install-cert` 将证书部署到以下路径：
+
+| 宿主机 | NGINX 容器 |
+| --- | --- |
+| `setup/nginx/certs/example.com/fullchain.pem` | `/etc/ssl/depends/example.com/fullchain.pem` |
+| `setup/nginx/certs/example.com/privkey.pem` | `/etc/ssl/depends/example.com/privkey.pem` |
+
+`certs/` 除 `.gitkeep` 外全部被 Git 忽略；私钥权限为 `600`。不要将新证书写入历史 `setup/nginx/ssl/` 中已受版本管理的文件。挂载整个目录保证续期替换文件后，容器可以看到新证书；不要改为逐个 PEM 文件的 bind mount。
+
+各项目仍在自己维护的站点配置中启用 HTTPS。保留其实际 `server_name`、路由和上游配置，并在 `server` 中增加：
+
+```nginx
+listen 443 ssl;
+ssl_certificate /etc/ssl/depends/example.com/fullchain.pem;
+ssl_certificate_key /etc/ssl/depends/example.com/privkey.pem;
+ssl_protocols TLSv1.2 TLSv1.3;
+```
+
+仅在证书文件已存在时投放 TLS 站点。新增站点或更换证书后先执行 `nginx -t`，再执行 `nginx -s reload`；首次增加端口和挂载时需仅重建 NGINX 容器。
+
+服务器使用 `depends-acme-renew.timer` 每天触发两次续期检查并加入随机延迟。只有接近到期时才申请新证书；成功安装新证书后，部署钩子会检查并重载本项目的 NGINX。安装 acme.sh 时必须关闭其自带 cron，避免重复申请。
+
+创建 root-only 的 systemd 服务和 timer：
+
+```bash
+cat >/etc/systemd/system/depends-acme-renew.service <<'EOF'
+[Unit]
+Description=Renew Let's Encrypt certificates for depends NGINX
+Wants=network-online.target
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+User=root
+UMask=0077
+WorkingDirectory=/opt/apps/depends
+EnvironmentFile=/root/.config/acme/aliyun.env
+ExecStart=/root/.acme.sh/acme.sh --cron --home /root/.acme.sh
+TimeoutStartSec=20min
+EOF
+
+cat >/etc/systemd/system/depends-acme-renew.timer <<'EOF'
+[Unit]
+Description=Check depends Let's Encrypt certificate renewal twice daily
+
+[Timer]
+OnCalendar=*-*-* 03,15:00:00
+RandomizedDelaySec=1h
+Persistent=true
+Unit=depends-acme-renew.service
+
+[Install]
+WantedBy=timers.target
+EOF
+
+chmod 644 /etc/systemd/system/depends-acme-renew.service /etc/systemd/system/depends-acme-renew.timer
+systemd-analyze verify /etc/systemd/system/depends-acme-renew.service /etc/systemd/system/depends-acme-renew.timer
+systemctl daemon-reload
+systemctl enable --now depends-acme-renew.timer
+systemctl start depends-acme-renew.service
+systemctl show depends-acme-renew.service --property=Result --property=ExecMainStatus
+systemctl list-timers depends-acme-renew.timer --no-pager
+```
+
+`Result=success` 和 `ExecMainStatus=0` 表示本次检查成功。定时任务未到续期窗口时不会申请新证书；成功续期时，`--install-cert` 保存的 reload hook 会先执行 `nginx -t`，再 reload。检查并删除重复的 acme.sh cron：
+
+```bash
+systemctl list-timers depends-acme-renew.timer
+systemctl status depends-acme-renew.service --no-pager
+journalctl -u depends-acme-renew.service --since '7 days ago' --no-pager
+openssl x509 -in /opt/apps/depends/setup/nginx/certs/example.com/fullchain.pem -noout -issuer -dates -ext subjectAltName
+crontab -l
+```
+
+远端已部署的通配符 TLS 入口配置属于运行环境文件，不提交本仓库。证书只提供 TLS 身份验证；具体域名的页面和反向代理仍由各项目自己的配置决定。
 
 ### 从宿主机 NGINX 切回容器
 
@@ -196,7 +407,7 @@ docker compose exec -T nginx nginx -t
 curl --fail --silent --show-error http://127.0.0.1/ >/dev/null
 ```
 
-确认 Compose 发布的宿主机端口为 `80`、`3306`、`6379`、`27017`、`5672`、`15672` 和 `9200`，并且这些端口默认绑定所有网络接口。RabbitMQ 的 Prometheus 端口 `15692` 保持为容器内部端口，Elasticsearch 传输端口 `9300` 不得发布到主机。默认 NGINX 提供官方欢迎页，添加站点后还需按域名单独验证转发。
+确认 Compose 发布的宿主机端口为 `80`、`443`、`3306`、`6379`、`27017`、`5672`、`15672` 和 `9200`，并且这些端口默认绑定所有网络接口。RabbitMQ 的 Prometheus 端口 `15692` 保持为容器内部端口，Elasticsearch 传输端口 `9300` 不得发布到主机。默认 NGINX 提供官方欢迎页，添加站点后还需按域名单独验证转发。
 
 进行组件检查时，请使用经过身份验证的命令，并避免将密码写入 shell 历史或日志。示例：
 
@@ -307,7 +518,7 @@ PY
 
 | 服务 | 镜像或基础镜像 | 宿主机端口映射 |
 | --- | --- | --- |
-| NGINX | `nginx:1.30.4-trixie` | `80:80` |
+| NGINX | `nginx:1.30.4-trixie` | `80:80`、`443:443` |
 | Redis | `redis:8.10.1` | `6379:6379` |
 | MySQL | `mysql:9.7.2` | `3306:3306` |
 | MongoDB | `mongo:8.3.8-noble` | `27017:27017` |

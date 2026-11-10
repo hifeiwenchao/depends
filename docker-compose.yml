@@ -9,8 +9,10 @@ services:
     image: nginx:1.30.4-trixie
     ports:
       - "80:80"
+      - "443:443"
     volumes:
       - ./setup/nginx/conf:/etc/nginx:ro
+      - ./setup/nginx/certs:/etc/ssl/depends:ro
     restart: unless-stopped
     environment:
       - TZ=Asia/Shanghai

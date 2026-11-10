@@ -23,5 +23,7 @@ docker-compose-dev.yml
 .env
 .env.*
 !.env.example
+/setup/nginx/certs/*
+!/setup/nginx/certs/.gitkeep
 /setup/nginx/conf/conf.d/*
 !/setup/nginx/conf/conf.d/default.conf
