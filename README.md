@@ -1,6 +1,6 @@
 # depends
 
-用于远程主机上的个人开发服务栈，提供 NGINX、MySQL、Redis、MongoDB、RabbitMQ 和 Elasticsearch。多个项目共用本 Compose 的 NGINX 容器作为统一入口，各项目自行维护站点配置，部署时放入 `setup/nginx/conf/conf.d/`。本配置使用 Compose 的简写端口映射（例如 `80:80`），默认将已发布的服务端口绑定到所有宿主机网络接口，允许外部客户端访问；仍**不适用于生产环境**。操作者必须控制 Docker 主机及其网络边界。
+用于远程主机上的个人开发服务栈，提供 NGINX、MySQL、PostgreSQL、Oracle Database Free、Redis、MongoDB、RabbitMQ 和 Elasticsearch。多个项目共用本 Compose 的 NGINX 容器作为统一入口，各项目自行维护站点配置，部署时放入 `setup/nginx/conf/conf.d/`。本配置使用 Compose 的简写端口映射（例如 `80:80`），默认将已发布的服务端口绑定到所有宿主机网络接口，允许外部客户端访问；仍**不适用于生产环境**。操作者必须控制 Docker 主机及其网络边界。
 
 ## 环境要求
 
@@ -9,6 +9,7 @@
 - 本地仓库副本。
 - 远程主机的公网或私网地址、DNS（如有），以及已放行的云安全组和主机防火墙规则。
 - 在 Docker Desktop 上运行 Elasticsearch 时，共享仓库路径，为 Docker Desktop Linux 虚拟机分配至少 4 GiB 内存，并在该虚拟机内确保 `vm.max_map_count` 至少为 `1048576`，然后再启动。
+- 同时运行全部八个业务服务时，建议为 Docker 分配至少 12 GiB 内存。Oracle 容器的内存上限为 3 GiB，共享内存为 1 GiB；PostgreSQL 的共享内存为 128 MiB。
 
 ## 配置
 
@@ -18,15 +19,41 @@
 cp .env.example .env
 ```
 
-在 `.env` 中设置以下本地凭据：`MYSQL_ROOT_PASSWORD`、`MYSQL_PASSWORD`、`REDIS_PASSWORD`、`MONGO_INITDB_ROOT_PASSWORD`、`RABBITMQ_DEFAULT_PASS` 和 `ELASTIC_PASSWORD`。每个密码都必须使用 URL 安全字符集 `[A-Za-z0-9._~-]+` 生成；验证示例会将 `.env` 作为 POSIX shell 脚本加载，Redis ACL 生成也会强制使用同一字符集。`RABBITMQ_DEFAULT_USER` 默认为 `dev`；对于普通的容器网络客户端，不要使用 `guest`。将 `.env` 保留在本地：不要提交它，也不要把凭据粘贴到 issue 或聊天记录中。不要暴露或分享其内容。
+在 `.env` 中设置以下本地凭据：`MYSQL_ROOT_PASSWORD`、`MYSQL_PASSWORD`、`POSTGRES_PASSWORD`、`ORACLE_PASSWORD`、`ORACLE_APP_PASSWORD`、`REDIS_PASSWORD`、`MONGO_INITDB_ROOT_PASSWORD`、`RABBITMQ_DEFAULT_PASS` 和 `ELASTIC_PASSWORD`。密码均为必填项，没有默认密码。每个密码都必须使用 URL 安全字符集 `[A-Za-z0-9._~-]+` 生成；验证示例会将 `.env` 作为 POSIX shell 脚本加载，Redis ACL 生成也会强制使用同一字符集。`RABBITMQ_DEFAULT_USER` 默认为 `dev`；对于普通的容器网络客户端，不要使用 `guest`。将 `.env` 保留在本地：不要提交它，也不要把凭据粘贴到 issue 或聊天记录中。不要暴露或分享其内容。
 
-此配置会将 MySQL、Redis、MongoDB、RabbitMQ AMQP/Management 和 Elasticsearch HTTP 端口发布到所有网络接口。Compose 中省略宿主机 IP 的映射（例如 `3306:3306`）等价于 IPv4 的 `0.0.0.0:3306:3306`。请在云安全组和主机防火墙中限制来源 IP；不要把这些端口直接暴露给不受信任的公网。远程访问必须使用强凭据；生产环境还应通过 VPN、反向代理或其他受控网络边界提供 TLS 和访问控制。
+此配置会将 MySQL、PostgreSQL、Oracle、Redis、MongoDB、RabbitMQ AMQP/Management 和 Elasticsearch HTTP 端口发布到所有网络接口。Compose 中省略宿主机 IP 的映射（例如 `3306:3306`）等价于 IPv4 的 `0.0.0.0:3306:3306`。请在云安全组和主机防火墙中限制来源 IP；不要把这些端口直接暴露给不受信任的公网。远程访问必须使用强凭据；生产环境还应通过 VPN、反向代理或其他受控网络边界提供 TLS 和访问控制。
 
 Compose 文件**不会自动创建 MySQL 应用数据库**。如果应用需要，请在 MySQL 健康运行后显式创建应用数据库。
 
 MySQL 仅在初始化空的 `setup/mysql/data/` 时应用 `MYSQL_ROOT_PASSWORD`、`MYSQL_USER` 和 `MYSQL_PASSWORD`。在已初始化的数据目录中修改 `.env` 不会轮换账户；请使用经过身份验证的 `ALTER USER` 语句进行轮换。MongoDB 同样仅在初始化空的 `setup/mongo/db/` 时应用 `MONGO_INITDB_ROOT_USERNAME` 和 `MONGO_INITDB_ROOT_PASSWORD`；之后修改 `.env` 不会轮换已持久化的用户，因此请使用经过身份验证的 MongoDB 用户管理命令进行轮换。
 
 RabbitMQ 首次以空数据目录启动时，会创建配置的用户并使用默认 `/` vhost；它不会创建特定于应用的 vhost。RabbitMQ 引导环境变量只在初始化期间生效，因此之后修改它们不会轮换持久化在 broker 数据中的凭据。Elasticsearch 同样只在初始化空数据时应用 `ELASTIC_PASSWORD`。对于已初始化的集群，修改环境变量不会轮换内置 `elastic` 密码；请改用 `elasticsearch-reset-password`。
+
+### PostgreSQL 与 Oracle Database Free
+
+PostgreSQL 使用官方 `postgres:18.6-trixie` 镜像。首次初始化空的 `setup/postgresql/data/` 时，创建由 `POSTGRES_USER` 指定的初始化超级用户和由 `POSTGRES_DB` 指定的数据库，两者默认均为 `dev`；超级用户密码由必填的 `POSTGRES_PASSWORD` 设置。初始化参数 `--auth-host=scram-sha-256` 要求所有 TCP 连接（包括容器内的回环地址）使用密码认证，使健康检查能够验证密码是否正确。应用需要受限权限时，应另外创建专用角色并授权。已有数据目录中修改这些环境变量不会更改现有角色、密码、数据库或认证规则，请使用经过身份验证的 SQL 管理命令及 `pg_hba.conf` 处理。
+
+PostgreSQL 18 将整个 `setup/postgresql/data/` 挂载到 `/var/lib/postgresql`，实际 `PGDATA` 为镜像默认的 `/var/lib/postgresql/18/docker`。不要沿用旧版本镜像的 `/var/lib/postgresql/data` 挂载路径，也不要直接用 PostgreSQL 18 启动其他主版本的数据目录；主版本迁移须使用 PostgreSQL 支持的升级或导出导入流程。镜像行为参见 [PostgreSQL 官方镜像文档](https://hub.docker.com/_/postgres)。
+
+Oracle 使用社区维护的 `gvenzl/oracle-free:23.26.3-slim` 镜像，内含 Oracle AI Database 26ai Free（Oracle Database Free），支持 amd64 和 arm64。该镜像不是 Oracle XE 或 Enterprise Edition。Oracle Database Free 自身限制为 2 个 CPU、2 GiB 数据库内存和 12 GB 用户数据；Compose 为容器设置的 3 GiB 内存上限不会提高这些限制。
+
+Oracle 首次初始化空的 `setup/oracle/data/` 时，使用必填的 `ORACLE_PASSWORD` 设置 `SYS` 和 `SYSTEM` 密码，并在预置的 `FREEPDB1` 中创建应用用户及同名 schema。`ORACLE_APP_USER` 默认为 `dev`，`ORACLE_APP_PASSWORD` 必填，Compose 将它们分别传入镜像的 `APP_USER` 和 `APP_USER_PASSWORD`。应用连接使用该应用用户；初始化后的环境变量修改不会轮换现有数据库用户或密码，请使用经过身份验证的 Oracle 用户管理命令处理。镜像行为参见 [gvenzl/oracle-free 文档](https://github.com/gvenzl/oci-oracle-free)。
+
+远程客户端使用下列连接信息；将 `db.example.com` 替换为服务器地址，用户名和数据库名按 `.env` 的实际配置填写：
+
+| 服务 | 主机与端口 | 数据库或服务名 | 默认用户 |
+| --- | --- | --- | --- |
+| PostgreSQL | `db.example.com:5432` | 数据库 `dev` | `dev`（初始化超级用户） |
+| Oracle | `db.example.com:1521` | Service Name `FREEPDB1` | `dev`（应用用户） |
+
+Oracle 连接配置中的 `FREEPDB1` 是 Service Name，不是 SID。以下客户端命令会交互式提示输入密码，避免将密码写入命令行；PostgreSQL 使用 `POSTGRES_PASSWORD`，Oracle 使用 `ORACLE_APP_PASSWORD`：
+
+```bash
+psql -h db.example.com -p 5432 -U dev -d dev -W
+sqlplus -L dev@//db.example.com:1521/FREEPDB1
+```
+
+已加入本 Compose `main` 网络的客户端，可分别使用 `postgresql:5432` 和 `oracle:1521/FREEPDB1` 访问容器。
 
 ## Linux 开发工具安装
 
@@ -390,12 +417,14 @@ docker compose up -d --wait --wait-timeout 60 nginx
 docker compose up -d redis
 docker compose up -d mongo
 docker compose up -d mysql
+docker compose up -d postgresql
+docker compose up -d oracle
 docker compose up -d rabbitmq
 docker compose up -d elasticsearch
 docker compose ps
 ```
 
-按上述顺序逐个启动并验证有状态服务；等待每个服务变为 healthy 后再继续。启动 Elasticsearch 时，Compose 会先运行 `elasticsearch-permissions` 一次性初始化服务，以 root 身份将 `setup/elasticsearch/data/` 设置为容器用户 `1000:0` 可写，然后再启动 Elasticsearch；该服务不会删除或重建已有数据。六个业务服务使用下方列出的精确版本，都应处于运行状态，并最终报告 `healthy`；权限初始化服务显示 `Exited (0)` 属于正常状态。
+按上述顺序逐个启动并验证有状态服务；等待每个服务变为 healthy 后再继续。启动 Oracle 时，Compose 会先运行 `oracle-permissions` 一次性初始化服务，以 root 身份将 `setup/oracle/data/` 设置为镜像内的 `oracle:oinstall` 账户可写，成功后才启动 Oracle。Oracle 首次启动需要较长时间，健康检查使用镜像的 `healthcheck.sh`，预留 120 秒启动期，随后每 15 秒检查一次，单次超时 10 秒，允许连续失败 20 次。启动 Elasticsearch 时，Compose 会先运行 `elasticsearch-permissions` 一次性初始化服务，以 root 身份将 `setup/elasticsearch/data/` 设置为容器用户 `1000:0` 可写，然后再启动 Elasticsearch。两个权限初始化服务都不会删除或重建已有数据。八个业务服务使用下方列出的精确版本，都应处于运行状态，并最终报告 `healthy`；权限初始化服务显示 `Exited (0)` 属于正常状态。
 
 ## 验证
 
@@ -407,7 +436,7 @@ docker compose exec -T nginx nginx -t
 curl --fail --silent --show-error http://127.0.0.1/ >/dev/null
 ```
 
-确认 Compose 发布的宿主机端口为 `80`、`443`、`3306`、`6379`、`27017`、`5672`、`15672` 和 `9200`，并且这些端口默认绑定所有网络接口。RabbitMQ 的 Prometheus 端口 `15692` 保持为容器内部端口，Elasticsearch 传输端口 `9300` 不得发布到主机。默认 NGINX 提供官方欢迎页，添加站点后还需按域名单独验证转发。
+确认 Compose 发布的宿主机端口为 `80`、`443`、`3306`、`5432`、`1521`、`6379`、`27017`、`5672`、`15672` 和 `9200`，并且这些端口默认绑定所有网络接口。RabbitMQ 的 Prometheus 端口 `15692` 保持为容器内部端口，Elasticsearch 传输端口 `9300` 不得发布到主机。默认 NGINX 提供官方欢迎页，添加站点后还需按域名单独验证转发。
 
 进行组件检查时，请使用经过身份验证的命令，并避免将密码写入 shell 历史或日志。示例：
 
@@ -419,14 +448,35 @@ set -a
 set +a
 docker compose exec -e REDISCLI_AUTH="$REDIS_PASSWORD" redis redis-cli --user "$REDIS_USERNAME" --no-auth-warning ping
 MYSQL_PWD="$MYSQL_ROOT_PASSWORD" docker compose exec -e MYSQL_PWD mysql mysql -h 127.0.0.1 -uroot --silent --skip-column-names --execute='SELECT 1'
+docker compose exec -T postgresql sh -ec 'PGPASSWORD="$POSTGRES_PASSWORD" psql -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 --tuples-only --no-align --command="SELECT 1"'
 docker compose exec mongo mongosh --quiet --username "$MONGO_INITDB_ROOT_USERNAME" --password "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin --eval 'quit(db.adminCommand({ping:1}).ok ? 0 : 2)'
 docker compose exec rabbitmq rabbitmq-diagnostics -q ping
 curl --fail --silent --show-error --user "$RABBITMQ_DEFAULT_USER:$RABBITMQ_DEFAULT_PASS" http://127.0.0.1:15672/api/overview >/dev/null
 curl --fail --silent --show-error --user "elastic:$ELASTIC_PASSWORD" 'http://127.0.0.1:9200/_cluster/health?wait_for_status=yellow&timeout=5s' >/dev/null
-unset REDIS_PASSWORD MYSQL_ROOT_PASSWORD MYSQL_PASSWORD MONGO_INITDB_ROOT_PASSWORD RABBITMQ_DEFAULT_PASS ELASTIC_PASSWORD
+unset REDIS_PASSWORD MYSQL_ROOT_PASSWORD MYSQL_PASSWORD POSTGRES_PASSWORD ORACLE_PASSWORD ORACLE_APP_PASSWORD MONGO_INITDB_ROOT_PASSWORD RABBITMQ_DEFAULT_PASS ELASTIC_PASSWORD
 ```
 
-Redis 应返回 `PONG`；MySQL 应报告其正在运行；MongoDB 应成功响应 ping 命令。RabbitMQ 应通过 broker 诊断，并且其经过身份验证的管理 API 已发布到宿主机所有网络接口的 `15672` 端口。Elasticsearch 应在 `http://服务器地址:9200` 上要求 `elastic` 密码，并达到黄色或绿色的单节点集群健康状态。当前 Elasticsearch 使用明文 HTTP；远程部署时必须通过防火墙、VPN 或反向代理限制访问，生产环境应启用 TLS。确认报告的组件版本与下方版本一致，并在使用该服务栈前确认六个业务服务都处于 healthy 状态。
+PostgreSQL 的检查从容器环境中读取密码并通过 TCP 执行 `SELECT 1`，应返回 `1`；其 Compose 健康检查也使用经过认证的 TCP 查询。Oracle 使用交互式 SQL*Plus 验证应用用户，默认用户名为 `dev`；如已修改 `ORACLE_APP_USER`，替换下方用户名，在提示时输入 `ORACLE_APP_PASSWORD`：
+
+```bash
+docker compose exec oracle sqlplus -L dev@//127.0.0.1:1521/FREEPDB1
+```
+
+登录后执行：
+
+```sql
+SELECT 1 FROM dual;
+EXIT;
+```
+
+Oracle 查询应返回 `1`。Redis 应返回 `PONG`；MySQL 应报告其正在运行；MongoDB 应成功响应 ping 命令。RabbitMQ 应通过 broker 诊断，并且其经过身份验证的管理 API 已发布到宿主机所有网络接口的 `15672` 端口。Elasticsearch 应在 `http://服务器地址:9200` 上要求 `elastic` 密码，并达到黄色或绿色的单节点集群健康状态。当前 Elasticsearch 使用明文 HTTP；远程部署时必须通过防火墙、VPN 或反向代理限制访问，生产环境应启用 TLS。确认报告的组件版本与下方版本一致，并在使用该服务栈前确认八个业务服务都处于 healthy 状态。
+
+PostgreSQL 和 Oracle 使用以下本地映射：
+
+```text
+setup/postgresql/data/ -> /var/lib/postgresql (PGDATA=/var/lib/postgresql/18/docker)
+setup/oracle/data/ -> /opt/oracle/oradata
+```
 
 RabbitMQ 使用以下本地映射：
 
@@ -455,7 +505,7 @@ setup/rabbitmq/data/
 setup/elasticsearch/data/
 ```
 
-此列表定义当前的重置边界；它**不表示** RabbitMQ 或 Elasticsearch 的数据在任何先前的重置中已被删除。请从仓库根目录运行以下流程。流程首先要求对应的五个服务全部成功停止，然后解析并检查每个精确目标且不跟随目标符号链接，显示解析后的路径，并要求输入精确的确认短语。它会保留所有父目录和任何 `.gitkeep` 占位文件，同时删除其他条目，包括隐藏条目。
+此列表定义当前的重置边界；此流程不会停止 PostgreSQL 或 Oracle，也不会清理新增的 `setup/postgresql/data/` 和 `setup/oracle/data/`。它**不表示** RabbitMQ 或 Elasticsearch 的数据在任何先前的重置中已被删除。请从仓库根目录运行以下流程。流程首先要求对应的五个服务全部成功停止，然后解析并检查每个精确目标且不跟随目标符号链接，显示解析后的路径，并要求输入精确的确认短语。它会保留所有父目录和任何 `.gitkeep` 占位文件，同时删除其他条目，包括隐藏条目。
 
 ```bash
 set -eu
@@ -521,6 +571,8 @@ PY
 | NGINX | `nginx:1.30.4-trixie` | `80:80`、`443:443` |
 | Redis | `redis:8.10.1` | `6379:6379` |
 | MySQL | `mysql:9.7.2` | `3306:3306` |
+| PostgreSQL | `postgres:18.6-trixie` | `5432:5432` |
+| Oracle Database Free | `gvenzl/oracle-free:23.26.3-slim` | `1521:1521` |
 | MongoDB | `mongo:8.3.8-noble` | `27017:27017` |
 | RabbitMQ | `rabbitmq:4.3.5-management` | `5672:5672`、`15672:15672` |
 | Elasticsearch | `docker.elastic.co/elasticsearch/elasticsearch:9.5.2` | `9200:9200` |

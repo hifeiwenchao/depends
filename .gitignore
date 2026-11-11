@@ -4,6 +4,8 @@
 /setup/kafka/logs/*
 /setup/mysql/data/*
 /setup/mysql/log/*
+/setup/postgresql/data/*
+/setup/oracle/data/*
 /setup/redis/data/*
 /setup/zookeeper/data/*
 /setup/zookeeper/log/*
