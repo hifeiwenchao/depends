@@ -2,7 +2,11 @@
 set -Eeuo pipefail
 IFS=$'\n\t'
 
-readonly MINICONDA_BASE_URL="https://repo.anaconda.com/miniconda"
+MINICONDA_BASE_URL="${MINICONDA_BASE_URL:-https://mirrors.tuna.tsinghua.edu.cn/anaconda/miniconda}"
+readonly MINICONDA_CHECKSUM_URL="https://repo.anaconda.com/miniconda/"
+DOCKER_DOWNLOAD_URL="${DOCKER_DOWNLOAD_URL:-https://mirrors.aliyun.com/docker-ce/linux}"
+SUPERVISOR_PIP_INDEX_URL="${SUPERVISOR_PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}"
+NPM_REGISTRY="${NPM_REGISTRY:-https://registry.npmmirror.com}"
 
 DRY_RUN=0
 TARGET_USER="${TARGET_USER:-${SUDO_USER:-${USER:-}}}"
@@ -15,6 +19,9 @@ OH_MY_ZSH_REF="${OH_MY_ZSH_REF:-master}"
 ZSH_SYNTAX_HIGHLIGHTING_REF="${ZSH_SYNTAX_HIGHLIGHTING_REF:-0.8.0}"
 ZSH_AUTOSUGGESTIONS_REF="${ZSH_AUTOSUGGESTIONS_REF:-v0.7.1}"
 POWERLEVEL10K_REF="${POWERLEVEL10K_REF:-v1.20.0}"
+ZSH_SYNTAX_HIGHLIGHTING_REPO="${ZSH_SYNTAX_HIGHLIGHTING_REPO:-https://github.com/zsh-users/zsh-syntax-highlighting.git}"
+ZSH_AUTOSUGGESTIONS_REPO="${ZSH_AUTOSUGGESTIONS_REPO:-https://github.com/zsh-users/zsh-autosuggestions.git}"
+POWERLEVEL10K_REPO="${POWERLEVEL10K_REPO:-https://github.com/romkatv/powerlevel10k.git}"
 DOCKER_CHANNEL="${DOCKER_CHANNEL:-stable}"
 DOCKER_CE_VERSION="${DOCKER_CE_VERSION:-}"
 DOCKER_RPM_REPO_URL="${DOCKER_RPM_REPO_URL:-}"
@@ -46,6 +53,10 @@ Environment overrides:
   TARGET_USER       User that receives Oh My Zsh and Miniconda; defaults to the current user.
   MINICONDA_VERSION Official Miniconda release, default: latest (stable channel).
   MINICONDA_PREFIX  Install location, default: $TARGET_USER's home/miniconda3.
+  MINICONDA_BASE_URL Installer mirror; default: Tsinghua. SHA-256 comes from Anaconda.
+  DOCKER_DOWNLOAD_URL Docker APT/RPM base URL; default: https://mirrors.aliyun.com/docker-ce/linux.
+  SUPERVISOR_PIP_INDEX_URL Supervisor pip index; default: https://pypi.tuna.tsinghua.edu.cn/simple.
+  NPM_REGISTRY      Target user's npm registry; default: https://registry.npmmirror.com.
   SUPERVISOR_VERSION Optional exact stable Supervisor release for pip installs.
   SUPERVISOR_CONFIG  Supervisor configuration path, default: /etc/supervisord.conf.
   OH_MY_ZSH_REF     Oh My Zsh branch or tag, default: master.
@@ -53,6 +64,8 @@ Environment overrides:
   ZSH_SYNTAX_HIGHLIGHTING_REF  Plugin tag, default: 0.8.0.
   ZSH_AUTOSUGGESTIONS_REF      Plugin tag, default: v0.7.1.
   POWERLEVEL10K_REF             Theme tag, default: v1.20.0.
+  ZSH_SYNTAX_HIGHLIGHTING_REPO, ZSH_AUTOSUGGESTIONS_REPO, POWERLEVEL10K_REPO
+                   Override plugin/theme repositories with trusted mirrors.
   DOCKER_CHANNEL    Docker repository channel; only 'stable' is accepted.
   DOCKER_CE_VERSION Optional exact docker-ce/docker-ce-cli package version on APT.
   DOCKER_RPM_REPO_URL Optional HTTPS Docker RPM repo override for restricted networks.
@@ -162,6 +175,11 @@ require_privileges() {
 }
 
 validate_options() {
+  local source_url
+  for source_url in "$MINICONDA_BASE_URL" "$DOCKER_DOWNLOAD_URL" "$SUPERVISOR_PIP_INDEX_URL" "$NPM_REGISTRY"; do
+    [[ "$source_url" == https://* && "$source_url" != *[[:space:]]* ]] ||
+      die 'download and pip source URLs must use HTTPS and contain no whitespace'
+  done
   [[ "$DOCKER_CHANNEL" == stable ]] || die "DOCKER_CHANNEL must be stable"
   [[ "$MINICONDA_VERSION" =~ ^[A-Za-z0-9._-]+$ ]] || die "MINICONDA_VERSION contains unsupported characters"
   if [[ -n "$SUPERVISOR_VERSION" ]]; then
@@ -214,12 +232,12 @@ install_docker_apt_repository() {
   if (( DRY_RUN )); then
     log "[dry-run] download Docker's stable signing key to /etc/apt/keyrings/docker.asc"
   else
-    curl -fsSL --retry 3 "https://download.docker.com/linux/$docker_os/gpg" |
+    curl -fsSL "${CURL_RETRY_ARGS[@]}" --connect-timeout 15 --max-time 60 "${DOCKER_DOWNLOAD_URL%/}/$docker_os/gpg" |
       root_cmd tee /etc/apt/keyrings/docker.asc >/dev/null
     root_cmd chmod a+r /etc/apt/keyrings/docker.asc
   fi
 
-  repository="deb [arch=$architecture signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/$docker_os $codename stable"
+  repository="deb [arch=$architecture signed-by=/etc/apt/keyrings/docker.asc] ${DOCKER_DOWNLOAD_URL%/}/$docker_os $codename stable"
   write_root_file "$repository" /etc/apt/sources.list.d/docker.list
 }
 
@@ -258,9 +276,9 @@ install_dnf_or_yum() {
   local curl_address_args=()
   local disabled_repo_args=()
   if [[ "$OS_ID" == fedora ]]; then
-    docker_repo_url="https://download.docker.com/linux/fedora/docker-ce.repo"
+    docker_repo_url="${DOCKER_DOWNLOAD_URL%/}/fedora/docker-ce.repo"
   else
-    docker_repo_url="https://download.docker.com/linux/centos/docker-ce.repo"
+    docker_repo_url="${DOCKER_DOWNLOAD_URL%/}/centos/docker-ce.repo"
   fi
   [[ -n "$DOCKER_RPM_REPO_URL" ]] && docker_repo_url="$DOCKER_RPM_REPO_URL"
   case "$DOCKER_RPM_IP_RESOLVE" in
@@ -461,7 +479,7 @@ install_supervisor_pip() {
     return
   fi
   if (( DRY_RUN )); then
-    root_cmd python3 -m pip install --upgrade "$package_spec"
+    root_cmd python3 -m pip install --index-url "$SUPERVISOR_PIP_INDEX_URL" --upgrade "$package_spec"
     return
   fi
   command -v python3 >/dev/null 2>&1 || die 'python3 is required to install Supervisor on RPM-based systems'
@@ -469,7 +487,7 @@ install_supervisor_pip() {
   if python3 -m pip install --help 2>&1 | grep -Fq -- '--break-system-packages'; then
     pip_args+=(--break-system-packages)
   fi
-  root_cmd python3 -m pip install --upgrade "${pip_args[@]}" "$package_spec"
+  root_cmd python3 -m pip install --index-url "$SUPERVISOR_PIP_INDEX_URL" --upgrade "${pip_args[@]}" "$package_spec"
 }
 
 install_supervisor() {
@@ -616,7 +634,10 @@ clone_user_repo() {
   if [[ -d "$destination" ]]; then
     log "Repository already exists at $destination; leaving it unchanged"
   else
-    user_cmd git clone --depth 1 --single-branch --branch "$ref" "$repository" "$destination"
+    if ! user_cmd git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=30 \
+      clone --depth 1 --single-branch --branch "$ref" "$repository" "$destination"; then
+      die "failed to clone $repository; configure a trusted repository mirror using the corresponding *_REPO variable"
+    fi
   fi
 }
 
@@ -674,15 +695,15 @@ install_oh_my_zsh() {
 
   user_cmd mkdir -p "$custom_dir/plugins" "$custom_dir/themes"
   clone_user_repo \
-    "https://github.com/zsh-users/zsh-syntax-highlighting.git" \
+    "$ZSH_SYNTAX_HIGHLIGHTING_REPO" \
     "$ZSH_SYNTAX_HIGHLIGHTING_REF" \
     "$custom_dir/plugins/zsh-syntax-highlighting"
   clone_user_repo \
-    "https://github.com/zsh-users/zsh-autosuggestions.git" \
+    "$ZSH_AUTOSUGGESTIONS_REPO" \
     "$ZSH_AUTOSUGGESTIONS_REF" \
     "$custom_dir/plugins/zsh-autosuggestions"
   clone_user_repo \
-    "https://github.com/romkatv/powerlevel10k.git" \
+    "$POWERLEVEL10K_REPO" \
     "$POWERLEVEL10K_REF" \
     "$custom_dir/themes/powerlevel10k"
 
@@ -712,9 +733,9 @@ install_miniconda() {
   architecture="$(miniconda_architecture)"
   # With the default channel this resolves to Miniconda3-latest-Linux-<architecture>.sh.
   installer_name="Miniconda3-$MINICONDA_VERSION-Linux-$architecture.sh"
-  installer_url="$MINICONDA_BASE_URL/$installer_name"
+  installer_url="${MINICONDA_BASE_URL%/}/$installer_name"
   # Anaconda publishes SHA-256 values in the directory index rather than .sha256 sidecars.
-  checksum_url="$MINICONDA_BASE_URL/"
+  checksum_url="$MINICONDA_CHECKSUM_URL"
 
   if [[ -x "$MINICONDA_PREFIX/bin/conda" ]]; then
     log "Miniconda already exists at $MINICONDA_PREFIX; leaving it unchanged"
@@ -723,7 +744,7 @@ install_miniconda() {
   [[ ! -e "$MINICONDA_PREFIX" ]] || die "Miniconda target exists but is incomplete: $MINICONDA_PREFIX"
 
   if (( DRY_RUN )); then
-    log "[dry-run] download and verify $installer_url"
+    log "[dry-run] download $installer_url and verify against $checksum_url"
     log "[dry-run] install Miniconda into $MINICONDA_PREFIX for $TARGET_USER"
     return
   fi
@@ -752,7 +773,7 @@ install_miniconda() {
   ' "$checksum")"
   actual="$(sha256sum "$installer" | awk '{ print $1 }')"
   [[ -n "$expected" ]] || die "Miniconda checksum was not found in index (installer_url=$installer_url, checksum_url=$checksum_url)"
-  [[ "$expected" == "$actual" ]] || die "Miniconda checksum verification failed"
+  [[ "$expected" == "$actual" ]] || die "Miniconda checksum verification failed; the mirror may not have synced $MINICONDA_VERSION yet. Retry later, pin MINICONDA_VERSION, or set MINICONDA_BASE_URL=https://repo.anaconda.com/miniconda"
 
   root_cmd chown "$TARGET_USER:" "$installer" "$checksum"
   user_cmd bash "$installer" -b -p "$MINICONDA_PREFIX"
@@ -811,6 +832,7 @@ main() {
 
   log "Installing stable development tools for $TARGET_USER on $OS_ID"
   install_system_packages
+  user_cmd npm config set registry "$NPM_REGISTRY" --location=user
   configure_docker_registry_mirror
   install_supervisor
   configure_supervisor
