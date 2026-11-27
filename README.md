@@ -35,7 +35,7 @@ PostgreSQL 使用官方 `postgres:18.6-trixie` 镜像。首次初始化空的 `s
 
 PostgreSQL 18 将整个 `setup/postgresql/data/` 挂载到 `/var/lib/postgresql`，实际 `PGDATA` 为镜像默认的 `/var/lib/postgresql/18/docker`。不要沿用旧版本镜像的 `/var/lib/postgresql/data` 挂载路径，也不要直接用 PostgreSQL 18 启动其他主版本的数据目录；主版本迁移须使用 PostgreSQL 支持的升级或导出导入流程。镜像行为参见 [PostgreSQL 官方镜像文档](https://hub.docker.com/_/postgres)。
 
-Oracle 使用社区维护的 `gvenzl/oracle-free:23.26.3-slim` 镜像，内含 Oracle AI Database 26ai Free（Oracle Database Free），支持 amd64 和 arm64。该镜像不是 Oracle XE 或 Enterprise Edition。Oracle Database Free 自身限制为 2 个 CPU、2 GiB 数据库内存和 12 GB 用户数据；Compose 为容器设置的 3 GiB 内存上限不会提高这些限制。
+Oracle 使用社区维护的 `ghcr.io/gvenzl/oracle-free:23.26.3-slim` 镜像，内含 Oracle AI Database 26ai Free（Oracle Database Free），支持 amd64 和 arm64。镜像从作者官方 GHCR 仓库拉取，绕过 Docker Hub 加速服务的镜像白名单限制。该镜像不是 Oracle XE 或 Enterprise Edition。Oracle Database Free 自身限制为 2 个 CPU、2 GiB 数据库内存和 12 GB 用户数据；Compose 为容器设置的 3 GiB 内存上限不会提高这些限制。
 
 Oracle 首次初始化空的 `setup/oracle/data/` 时，使用必填的 `ORACLE_PASSWORD` 设置 `SYS` 和 `SYSTEM` 密码，并在预置的 `FREEPDB1` 中创建应用用户及同名 schema。`ORACLE_APP_USER` 默认为 `dev`，`ORACLE_APP_PASSWORD` 必填，Compose 将它们分别传入镜像的 `APP_USER` 和 `APP_USER_PASSWORD`。应用连接使用该应用用户；初始化后的环境变量修改不会轮换现有数据库用户或密码，请使用经过身份验证的 Oracle 用户管理命令处理。镜像行为参见 [gvenzl/oracle-free 文档](https://github.com/gvenzl/oci-oracle-free)。
 
@@ -572,7 +572,7 @@ PY
 | Redis | `redis:8.10.1` | `6379:6379` |
 | MySQL | `mysql:9.7.2` | `3306:3306` |
 | PostgreSQL | `postgres:18.6-trixie` | `5432:5432` |
-| Oracle Database Free | `gvenzl/oracle-free:23.26.3-slim` | `1521:1521` |
+| Oracle Database Free | `ghcr.io/gvenzl/oracle-free:23.26.3-slim` | `1521:1521` |
 | MongoDB | `mongo:8.3.8-noble` | `27017:27017` |
 | RabbitMQ | `rabbitmq:4.3.5-management` | `5672:5672`、`15672:15672` |
 | Elasticsearch | `docker.elastic.co/elasticsearch/elasticsearch:9.5.2` | `9200:9200` |

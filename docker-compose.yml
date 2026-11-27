@@ -75,7 +75,7 @@ services:
       - main
 
   oracle-permissions:
-    image: gvenzl/oracle-free:23.26.3-slim
+    image: ghcr.io/gvenzl/oracle-free:23.26.3-slim
     user: "0:0"
     entrypoint: ["/bin/bash", "-c"]
     command:
@@ -89,7 +89,7 @@ services:
       - main
 
   oracle:
-    image: gvenzl/oracle-free:23.26.3-slim
+    image: ghcr.io/gvenzl/oracle-free:23.26.3-slim
     environment:
       ORACLE_PASSWORD: ${ORACLE_PASSWORD:?ORACLE_PASSWORD is required}
       APP_USER: ${ORACLE_APP_USER:-dev}
